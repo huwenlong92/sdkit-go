@@ -1,6 +1,6 @@
 # sdkit-go
 
-`sdkit` 是一组可复用的 Go 后端基础能力包，面向 `sdkitgo` 和其他 Go 后端项目。它将配置、日志、数据访问、异步任务、安全和通信等能力集中维护，供消费方按需接入。
+`sdkit-go` 是一组可复用的 Go 后端基础能力包，面向 `sdbase-go`、`sdbase-lite` 和其他 Go 后端项目。它将配置、日志、数据访问、异步任务、安全和通信等能力集中维护，供消费方按需接入。
 
 模块路径：`github.com/huwenlong92/sdkit-go`。
 
@@ -124,7 +124,13 @@ go mod edit -replace github.com/huwenlong92/sdkit-go=../sdkit-go
 go mod tidy
 ```
 
-`../sdkit-go` 应替换为实际的本地仓库路径。
+`../sdkit-go` 应替换为实际的本地仓库路径。此替换仅用于本地联调，交付前必须移除并恢复公开固定版本：
+
+```bash
+go mod edit -dropreplace github.com/huwenlong92/sdkit-go
+go mod tidy
+go build -mod=readonly ./...
+```
 
 在 sdkit-go 仓库根目录运行全量测试：
 
