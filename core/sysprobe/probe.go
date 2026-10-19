@@ -1,0 +1,276 @@
+package sysprobe
+
+import (
+	"context"
+	"fmt"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/shirou/gopsutil/v4/common"
+	"github.com/shirou/gopsutil/v4/cpu"
+	"github.com/shirou/gopsutil/v4/disk"
+	"github.com/shirou/gopsutil/v4/host"
+	"github.com/shirou/gopsutil/v4/mem"
+	gnet "github.com/shirou/gopsutil/v4/net"
+)
+
+const (
+	defaultCacheTTL    = 2 * time.Second
+	defaultCPUInterval = 200 * time.Millisecond
+	maxCPUInterval     = time.Second
+	maxDiskSpecs       = 16
+	maxNetworkSpecs    = 16
+)
+
+type HostProbe struct {
+	config HostConfig
+
+	mu          sync.Mutex
+	cached      HostSnapshot
+	cachedAt    time.Time
+	lastNetwork networkSample
+}
+
+type networkSample struct {
+	at       time.Time
+	bytesOut uint64
+	bytesIn  uint64
+}
+
+func NewHost(config HostConfig) *HostProbe {
+	return &HostProbe{config: normalizeConfig(config)}
+}
+
+func (p *HostProbe) Snapshot(ctx context.Context) (HostSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return HostSnapshot{}, err
+	}
+	if p == nil {
+		p = NewHost(HostConfig{})
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	now := time.Now()
+	if !p.cachedAt.IsZero() && now.Sub(p.cachedAt) < p.config.CacheTTL {
+		return cloneSnapshot(p.cached), nil
+	}
+
+	snapshot := p.collect(ctx)
+	if err := ctx.Err(); err != nil {
+		return HostSnapshot{}, err
+	}
+	p.cached = snapshot
+	p.cachedAt = snapshot.CollectedAt
+	return cloneSnapshot(snapshot), nil
+}
+
+func (p *HostProbe) collect(ctx context.Context) HostSnapshot {
+	snapshot := HostSnapshot{
+		Disks:  make([]Disk, 0, len(p.config.Disks)),
+		Issues: make([]Issue, 0),
+	}
+
+	if info, err := host.InfoWithContext(ctx); err != nil {
+		snapshot.addIssue("host", "", err)
+	} else if info != nil {
+		snapshot.Host = Host{
+			Hostname:        info.Hostname,
+			OS:              info.OS,
+			Platform:        info.Platform,
+			PlatformVersion: info.PlatformVersion,
+			KernelVersion:   info.KernelVersion,
+			Architecture:    runtime.GOARCH,
+			UptimeSeconds:   info.Uptime,
+			BootTime:        info.BootTime,
+		}
+	}
+
+	if cores, err := cpu.CountsWithContext(ctx, true); err != nil {
+		snapshot.addIssue("cpu", "", err)
+	} else {
+		snapshot.CPU.LogicalCores = cores
+	}
+	if percents, err := cpu.PercentWithContext(ctx, p.config.CPUInterval, false); err != nil {
+		snapshot.addIssue("cpu", "", err)
+	} else if len(percents) > 0 {
+		snapshot.CPU.UsedPercent = clampPercent(percents[0])
+	}
+
+	if stat, err := mem.VirtualMemoryWithContext(ctx); err != nil {
+		snapshot.addIssue("memory", "", err)
+	} else if stat != nil {
+		snapshot.Memory = Memory{
+			Total:       stat.Total,
+			Used:        stat.Used,
+			Available:   stat.Available,
+			UsedPercent: clampPercent(stat.UsedPercent),
+		}
+	}
+
+	for _, spec := range p.config.Disks {
+		stat, err := disk.UsageWithContext(ctx, spec.Path)
+		if err != nil {
+			snapshot.addIssue("disk", spec.Path, err)
+			continue
+		}
+		if stat == nil {
+			continue
+		}
+		snapshot.Disks = append(snapshot.Disks, Disk{
+			Name:        spec.Name,
+			Path:        spec.Path,
+			Filesystem:  stat.Fstype,
+			Total:       stat.Total,
+			Used:        stat.Used,
+			Free:        stat.Free,
+			UsedPercent: clampPercent(stat.UsedPercent),
+		})
+	}
+
+	networkCtx := ctx
+	if p.config.Network.ProcRoot != "" {
+		networkCtx = context.WithValue(ctx, common.EnvKey, common.EnvMap{
+			common.HostProcEnvKey: p.config.Network.ProcRoot,
+		})
+	}
+	perNIC := len(p.config.Network.Interfaces) > 0
+	if counters, err := gnet.IOCountersWithContext(networkCtx, perNIC); err != nil {
+		snapshot.addIssue("network", "", err)
+	} else if counter, missing, ok := selectNetworkCounters(counters, p.config.Network.Interfaces); ok {
+		if len(missing) > 0 {
+			snapshot.addIssue("network", strings.Join(missing, ","), fmt.Errorf("configured network interface is unavailable"))
+		}
+		now := time.Now()
+		snapshot.Network = Network{
+			BytesSent:       counter.BytesSent,
+			BytesReceived:   counter.BytesRecv,
+			PacketsSent:     counter.PacketsSent,
+			PacketsReceived: counter.PacketsRecv,
+		}
+		if !p.lastNetwork.at.IsZero() {
+			seconds := now.Sub(p.lastNetwork.at).Seconds()
+			if seconds > 0 && counter.BytesSent >= p.lastNetwork.bytesOut && counter.BytesRecv >= p.lastNetwork.bytesIn {
+				snapshot.Network.SendBytesPerSecond = float64(counter.BytesSent-p.lastNetwork.bytesOut) / seconds
+				snapshot.Network.RecvBytesPerSecond = float64(counter.BytesRecv-p.lastNetwork.bytesIn) / seconds
+				snapshot.Network.SampleWindow = seconds
+				snapshot.Network.RateReady = true
+			}
+		}
+		p.lastNetwork = networkSample{at: now, bytesOut: counter.BytesSent, bytesIn: counter.BytesRecv}
+	} else if len(missing) > 0 {
+		snapshot.addIssue("network", strings.Join(missing, ","), fmt.Errorf("configured network interface is unavailable"))
+	}
+
+	snapshot.CollectedAt = time.Now()
+	return snapshot
+}
+
+func normalizeConfig(config HostConfig) HostConfig {
+	if config.CacheTTL <= 0 {
+		config.CacheTTL = defaultCacheTTL
+	}
+	if config.CPUInterval <= 0 || config.CPUInterval > maxCPUInterval {
+		config.CPUInterval = defaultCPUInterval
+	}
+	disks := make([]DiskSpec, 0, len(config.Disks))
+	for _, spec := range config.Disks {
+		if len(disks) >= maxDiskSpecs {
+			break
+		}
+		spec.Path = strings.TrimSpace(spec.Path)
+		if spec.Path == "" {
+			continue
+		}
+		spec.Name = strings.TrimSpace(spec.Name)
+		if spec.Name == "" {
+			spec.Name = spec.Path
+		}
+		disks = append(disks, spec)
+	}
+	if len(disks) == 0 {
+		disks = append(disks, DiskSpec{Name: "workdir", Path: "."})
+	}
+	config.Disks = disks
+	config.Network.ProcRoot = strings.TrimSpace(config.Network.ProcRoot)
+	interfaces := make([]string, 0, len(config.Network.Interfaces))
+	seenInterfaces := make(map[string]struct{}, len(config.Network.Interfaces))
+	for _, name := range config.Network.Interfaces {
+		if len(interfaces) >= maxNetworkSpecs {
+			break
+		}
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seenInterfaces[name]; exists {
+			continue
+		}
+		seenInterfaces[name] = struct{}{}
+		interfaces = append(interfaces, name)
+	}
+	config.Network.Interfaces = interfaces
+	return config
+}
+
+func selectNetworkCounters(counters []gnet.IOCountersStat, interfaces []string) (gnet.IOCountersStat, []string, bool) {
+	if len(interfaces) == 0 {
+		if len(counters) == 0 {
+			return gnet.IOCountersStat{}, nil, false
+		}
+		return counters[0], nil, true
+	}
+
+	selected := make(map[string]struct{}, len(interfaces))
+	for _, name := range interfaces {
+		selected[name] = struct{}{}
+	}
+	total := gnet.IOCountersStat{}
+	for _, counter := range counters {
+		if _, exists := selected[counter.Name]; !exists {
+			continue
+		}
+		total.BytesSent += counter.BytesSent
+		total.BytesRecv += counter.BytesRecv
+		total.PacketsSent += counter.PacketsSent
+		total.PacketsRecv += counter.PacketsRecv
+		delete(selected, counter.Name)
+	}
+	missing := make([]string, 0, len(selected))
+	for _, name := range interfaces {
+		if _, exists := selected[name]; exists {
+			missing = append(missing, name)
+		}
+	}
+	return total, missing, len(selected) < len(interfaces)
+}
+
+func (s *HostSnapshot) addIssue(component string, path string, err error) {
+	if err == nil {
+		return
+	}
+	s.Issues = append(s.Issues, Issue{Component: component, Path: path, Message: err.Error()})
+}
+
+func clampPercent(value float64) float64 {
+	switch {
+	case value < 0:
+		return 0
+	case value > 100:
+		return 100
+	default:
+		return value
+	}
+}
+
+func cloneSnapshot(snapshot HostSnapshot) HostSnapshot {
+	snapshot.Disks = append([]Disk(nil), snapshot.Disks...)
+	snapshot.Issues = append([]Issue(nil), snapshot.Issues...)
+	return snapshot
+}

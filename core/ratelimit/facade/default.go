@@ -1,0 +1,17 @@
+package ratelimit
+
+import (
+	coreratelimit "github.com/huwenlong92/sdkit-go/core/ratelimit"
+	"github.com/huwenlong92/sdkit-go/core/runtime"
+)
+
+func From(app *runtime.App) Store {
+	if app != nil {
+		if value, ok := app.Container().Get(runtime.Key(Name)); ok {
+			if store, ok := value.(Store); ok {
+				return store
+			}
+		}
+	}
+	return coreratelimit.CustomStore
+}

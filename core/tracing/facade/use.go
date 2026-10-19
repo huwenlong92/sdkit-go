@@ -1,0 +1,133 @@
+package tracing
+
+import (
+	"context"
+
+	corelogger "github.com/huwenlong92/sdkit-go/core/logger"
+	loggerfacade "github.com/huwenlong92/sdkit-go/core/logger/facade"
+	"github.com/huwenlong92/sdkit-go/core/runtime"
+	coretracing "github.com/huwenlong92/sdkit-go/core/tracing"
+
+	"go.uber.org/zap"
+)
+
+type UseOption func(*useOptions)
+
+type useOptions struct {
+	config       Config
+	configLoader ConfigLoader
+	serviceName  string
+	environment  string
+	logger       *zap.Logger
+	dependencies []runtime.Dependency
+	internal     bool
+}
+
+func defaultUseOptions() useOptions {
+	return useOptions{
+		dependencies: []runtime.Dependency{
+			runtime.OptionalBootstrap(),
+			runtime.Optional(loggerfacade.Name),
+		},
+		internal: true,
+	}
+}
+
+func WithConfig(cfg Config) UseOption {
+	return func(o *useOptions) {
+		o.config = cfg
+	}
+}
+
+func WithConfigLoader(loader ConfigLoader) UseOption {
+	return func(o *useOptions) {
+		o.configLoader = loader
+	}
+}
+
+func WithServiceName(serviceName string) UseOption {
+	return func(o *useOptions) {
+		o.serviceName = serviceName
+	}
+}
+
+func WithEnvironment(environment string) UseOption {
+	return func(o *useOptions) {
+		o.environment = environment
+	}
+}
+
+func WithLogger(log *zap.Logger) UseOption {
+	return func(o *useOptions) {
+		o.logger = log
+	}
+}
+
+func WithDependencies(deps ...runtime.Dependency) UseOption {
+	return func(o *useOptions) {
+		o.dependencies = append(o.dependencies, deps...)
+	}
+}
+
+func WithInternal() UseOption {
+	return func(o *useOptions) {
+		o.internal = true
+	}
+}
+
+func WithExternal() UseOption {
+	return func(o *useOptions) {
+		o.internal = false
+	}
+}
+
+func Use(opts ...UseOption) runtime.Capability {
+	o := defaultUseOptions()
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
+	}
+
+	return runtime.NewCapabilityWithMetadataAndDependencies(runtime.CapabilityMetadata{
+		Name:        Name,
+		Description: "OpenTelemetry tracing",
+		Group:       runtime.GroupSystem,
+		Scope:       runtime.ScopeGlobal,
+		Internal:    o.internal,
+	}, o.dependencies, func(app *runtime.App) error {
+		cfg := o.config
+		if o.configLoader != nil {
+			loaded, err := o.configLoader(app)
+			if err != nil {
+				return err
+			}
+			cfg = loaded
+		}
+		if o.serviceName != "" && cfg.ServiceName == "" {
+			cfg.ServiceName = o.serviceName
+		}
+		if o.environment != "" && cfg.Environment == "" {
+			cfg.Environment = o.environment
+		}
+
+		log := o.logger
+		if log == nil {
+			log = corelogger.From(app)
+		}
+		if _, err := coretracing.Init(app.Context(), cfg); err != nil {
+			log.Error("Tracing初始化失败", zap.String(corelogger.TraceIDKey, ""), zap.Error(err))
+			return err
+		}
+		if cfg.Enabled {
+			log.Info("Tracing初始化成功",
+				zap.String(corelogger.TraceIDKey, ""),
+				zap.String("service_name", cfg.ServiceName),
+				zap.String("endpoint", cfg.Endpoint),
+			)
+		}
+		return nil
+	}, func(ctx context.Context) error {
+		return coretracing.Shutdown(ctx)
+	})
+}
