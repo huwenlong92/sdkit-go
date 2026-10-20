@@ -31,7 +31,7 @@ func BindProcessDefault(app *App, key Key, value any, publish, clear func()) err
 	container := app.Container()
 	app.mu.Lock()
 	defer app.mu.Unlock()
-	if app.stopping || app.stopped || app.defaultReleaseDone != nil {
+	if app.stopping || app.stopPending || app.stopped || app.defaultReleaseDone != nil {
 		return ErrAppStopped
 	}
 	if err := container.Bind(key, value); err != nil {

@@ -25,9 +25,11 @@ type App struct {
 	registeredCapabilities  []Capability
 	providerCapabilityNames map[string]struct{}
 	runningProviders        []Provider
-	stopping                bool
-	stopped                 bool
-	stopErr                 error
+	// stopPending records unfinished cleanup; stopping records an active Stop attempt.
+	stopPending bool
+	stopping    bool
+	stopped     bool
+	stopErr     error
 }
 
 func New() *App {

@@ -41,6 +41,11 @@ func (a *App) Stop(ctx context.Context) error {
 	if runtimeCancel != nil {
 		runtimeCancel()
 	}
+	// Capabilities are no longer ready while defaults drain, including between
+	// Stop attempts after a deadline. Their resources remain owned until retry.
+	for _, capability := range capabilities {
+		setObjectStatus(capability, StatusStopping, nil)
+	}
 	providerErr := a.stopProviders(ctx, providers, "")
 	if defaultErr := a.releaseProcessDefaults(ctx); defaultErr != nil {
 		a.mu.Lock()
@@ -60,6 +65,7 @@ func (a *App) Stop(ctx context.Context) error {
 	a.runningProviders = nil
 	a.registeredCapabilities = nil
 	a.stopped = true
+	a.stopPending = false
 	a.stopErr = err
 	a.stopping = false
 	a.mu.Unlock()
@@ -81,6 +87,7 @@ func (a *App) prepareRunContext(ctxs ...context.Context) context.Context {
 	a.defaultReleaseDone = nil
 	a.runningProviders = nil
 	a.stopping = false
+	a.stopPending = false
 	a.stopped = false
 	a.stopErr = nil
 	a.mu.Unlock()
@@ -109,6 +116,11 @@ func (a *App) clearRunningProviders() {
 
 func (a *App) cancelRuntimeContext() {
 	a.mu.Lock()
+	// Publish shutdown intent before cancellation wakes Run/RunProvider. A
+	// deadline while acquiring the gate or draining defaults still needs retry.
+	if !a.stopped {
+		a.stopPending = true
+	}
 	cancel := a.cancel
 	a.mu.Unlock()
 	if cancel != nil {
@@ -119,7 +131,7 @@ func (a *App) cancelRuntimeContext() {
 func (a *App) isStopping() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.stopping || a.stopped
+	return a.stopping || a.stopPending || a.stopped
 }
 
 type providerStartResult struct {
