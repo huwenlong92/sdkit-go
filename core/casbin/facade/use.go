@@ -10,6 +10,7 @@ import (
 type UseOption func(*useOptions)
 
 type useOptions struct {
+	explicitOnly   bool
 	config         Config
 	configLoader   ConfigLoader
 	database       *Database
@@ -78,6 +79,8 @@ func WithExternal() UseOption {
 	}
 }
 
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.explicitOnly = !enabled } }
+
 func Use(opts ...UseOption) runtime.Capability {
 	o := defaultUseOptions()
 	for _, opt := range opts {
@@ -121,6 +124,9 @@ func Use(opts ...UseOption) runtime.Capability {
 				return err
 			}
 			manager = created
+		}
+		if o.explicitOnly {
+			return app.Container().Bind(runtime.Key(Name), manager)
 		}
 		return corecasbin.Bind(app, manager)
 	}, nil)

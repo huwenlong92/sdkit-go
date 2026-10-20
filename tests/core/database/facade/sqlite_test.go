@@ -13,6 +13,7 @@ import (
 func TestSQLiteCapabilityStartAndStop(t *testing.T) {
 	t.Cleanup(coredatabase.Close)
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(database.Use(database.WithConfig(database.Config{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "runtime.db"), LogLevel: "silent"}))); err != nil {
 		t.Fatal(err)
 	}

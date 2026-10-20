@@ -25,6 +25,8 @@ func TestUseWithoutConfigBindsDefaultCache(t *testing.T) {
 	t.Cleanup(corecache.Close)
 
 	app := runtime.New()
+
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(cachefacade.Use()); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}
@@ -41,6 +43,7 @@ func TestUseWithCacheBindsInjectedCache(t *testing.T) {
 
 	cache := corecache.New()
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(cachefacade.Use(cachefacade.WithCache(cache))); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}

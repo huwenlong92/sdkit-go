@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"errors"
 
 	eventbus "github.com/huwenlong92/sdkit-go/core/eventbus/facade"
 	corerealtime "github.com/huwenlong92/sdkit-go/core/realtime"
@@ -13,6 +14,7 @@ type ConfigLoader func(app *runtime.App) (Config, error)
 type UseOption func(*useOptions)
 
 type useOptions struct {
+	explicitOnly bool
 	config       Config
 	configLoader ConfigLoader
 	service      Service
@@ -49,6 +51,8 @@ func WithInternal() UseOption {
 		o.internal = true
 	}
 }
+
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.explicitOnly = !enabled } }
 
 func Use(opts ...UseOption) runtime.Capability {
 	o := useOptions{}
@@ -88,13 +92,24 @@ func Use(opts ...UseOption) runtime.Capability {
 				return ErrEventBusNotConfigured
 			}
 			var err error
-			service, err = New(config, WithEventBus(eventbusService.Bus()))
+			service, err = New(config, WithEventBus(eventbusService.Bus()), WithoutDefault())
 			if err != nil {
 				return err
 			}
 		}
-		runtimeService = service
-		return corerealtime.Bind(app, service)
+		if o.service == nil {
+			runtimeService = service
+		}
+		bind := func() error {
+			if o.explicitOnly {
+				return app.Container().Bind(runtime.Key(Name), service)
+			}
+			return runtime.BindProcessDefault(app, runtime.Key(Name), service, func() { SetDefault(service); corerealtime.SetDefaultPublisher(service) }, func() { SetDefault(nil); corerealtime.SetDefaultPublisher(nil) })
+		}
+		if err := bind(); err != nil {
+			return errors.Join(err, closeService(&runtimeService))
+		}
+		return nil
 	}, func(context.Context) error {
 		return closeService(&runtimeService)
 	})
@@ -107,6 +122,7 @@ func From(app *runtime.App) Service {
 				return service
 			}
 		}
+		return nil
 	}
 	return Default()
 }

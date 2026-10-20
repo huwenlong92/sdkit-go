@@ -27,6 +27,8 @@ func TestUseWithoutConfigRequiresExplicitConfig(t *testing.T) {
 	t.Cleanup(func() { _ = coreemail.Close() })
 
 	app := runtime.New()
+
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(emailfacade.Use()); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}
@@ -41,6 +43,8 @@ func TestUseOptionalWithoutConfigSkipsBind(t *testing.T) {
 	t.Cleanup(func() { _ = coreemail.Close() })
 
 	app := runtime.New()
+
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(emailfacade.Use(emailfacade.WithOptional())); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}
@@ -58,6 +62,7 @@ func TestUseWithManagerBindsInjectedManager(t *testing.T) {
 
 	manager := &coreemail.Manager{}
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(emailfacade.Use(emailfacade.WithManager(manager))); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}

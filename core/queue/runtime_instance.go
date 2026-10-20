@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +22,9 @@ type RuntimeParts struct {
 type RuntimeInstanceOption func(*RuntimeInstance)
 
 type RuntimeInstance struct {
+	closeMu    sync.Mutex
+	closed     bool
+	closeErr   error
 	runner     QueueRunner
 	client     Client
 	worker     Worker
@@ -595,6 +599,12 @@ func (rt *RuntimeInstance) Close() error {
 	if rt == nil {
 		return nil
 	}
+	rt.closeMu.Lock()
+	defer rt.closeMu.Unlock()
+	if rt.closed {
+		return rt.closeErr
+	}
+	rt.closed = true
 	if rt.cancelSchedulePoller != nil {
 		rt.cancelSchedulePoller()
 		rt.cancelSchedulePoller = nil
@@ -619,16 +629,25 @@ func (rt *RuntimeInstance) Close() error {
 		closed = append(closed, instance)
 		return closer.Close()
 	}
-	return errors.Join(
+	rt.closeErr = errors.Join(
 		closeOnce(rt.runner),
 		closeOnce(rt.client),
 		closeOnce(rt.manager),
 	)
+	return rt.closeErr
 }
 
 func (rt *RuntimeInstance) StartSchedulePoller(ctx context.Context, cfg ScheduleConfig) context.CancelFunc {
 	if rt == nil || rt.client == nil || rt.taskStore == nil || !cfg.Enabled {
 		return nil
+	}
+	rt.closeMu.Lock()
+	defer rt.closeMu.Unlock()
+	if rt.closed {
+		return nil
+	}
+	if rt.cancelSchedulePoller != nil {
+		return rt.cancelSchedulePoller
 	}
 	store, ok := rt.taskStore.(TaskScheduleStore)
 	if !ok || store == nil {

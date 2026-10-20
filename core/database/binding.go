@@ -21,32 +21,30 @@ func From(app *runtime.App) *Database {
 		}
 		return nil
 	}
+	defaultMu.RLock()
+	defer defaultMu.RUnlock()
 	return Default
 }
 
 func Bind(app *runtime.App, db *Database) error {
-	if db == nil {
-		setDefault(nil)
-		if app == nil {
-			return nil
-		}
-		return runtime.ErrContainerValueNil
-	}
-	setDefault(db)
 	if app == nil {
+		setDefault(db)
 		return nil
 	}
-	return app.Container().Bind(KeyDatabase, db)
+	if db == nil {
+		return runtime.ErrContainerValueNil
+	}
+	return runtime.BindProcessDefault(app, KeyDatabase, db, func() { setDefault(db) }, func() { setDefault(nil) })
 }
 
 func GormFrom(app *runtime.App) *gorm.DB {
 	if db := From(app); db != nil {
-		return db.Gorm
+		return db.gormHandle()
 	}
 	if app != nil {
 		return nil
 	}
-	return DB
+	return nil
 }
 
 func Gorm(ctxs ...context.Context) *gorm.DB {
@@ -63,12 +61,12 @@ func Gorm(ctxs ...context.Context) *gorm.DB {
 
 func PGXFrom(app *runtime.App) *pgxpool.Pool {
 	if db := From(app); db != nil {
-		return db.PGX
+		return db.pgxHandle()
 	}
 	if app != nil {
 		return nil
 	}
-	return PGXPool
+	return nil
 }
 
 func PGX(ctxs ...context.Context) *pgxpool.Pool {
@@ -110,12 +108,25 @@ func PGXTransaction(ctx context.Context, fn func(tx pgx.Tx) error) error {
 }
 
 func setDefault(db *Database) {
+	var gormDB *gorm.DB
+	var pool *pgxpool.Pool
+	if db != nil {
+		gormDB = db.gormHandle()
+		pool = db.pgxHandle()
+	}
+	defaultMu.Lock()
+	defer defaultMu.Unlock()
 	Default = db
-	if db == nil {
+	DB = gormDB
+	PGXPool = pool
+}
+
+func clearDefault(db *Database) {
+	defaultMu.Lock()
+	defer defaultMu.Unlock()
+	if Default == db {
+		Default = nil
 		DB = nil
 		PGXPool = nil
-		return
 	}
-	DB = db.Gorm
-	PGXPool = db.PGX
 }

@@ -24,6 +24,7 @@ func TestUseDefaultsToInternal(t *testing.T) {
 
 func TestUseRequiresConfigOrClient(t *testing.T) {
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(redisfacade.Use()); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}
@@ -39,6 +40,7 @@ func TestUseWithClientSkipsConfig(t *testing.T) {
 
 	client := &coreredis.RuntimeClient{}
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(redisfacade.Use(redisfacade.WithClient(client))); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}

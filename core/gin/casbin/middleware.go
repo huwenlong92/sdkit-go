@@ -48,7 +48,7 @@ func WithResponder(responder ginresponder.ErrorResponder) MiddlewareOption {
 
 func Middleware(opts ...MiddlewareOption) gin.HandlerFunc {
 	cfg := &MiddlewareConfig{
-		Manager:        corecasbin.Default,
+		Manager:        corecasbin.From(nil),
 		ObjectResolver: defaultObjectResolver,
 	}
 	for _, opt := range opts {

@@ -80,6 +80,7 @@ func TestDriverValidationAndPostgresDefault(t *testing.T) {
 		t.Fatalf("sqlite schema config: %v", err)
 	}
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := database.Bind(app, nil); err == nil {
 		t.Fatal("nil binding must fail")
 	}

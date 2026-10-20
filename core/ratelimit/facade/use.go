@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
 
 	coreratelimit "github.com/huwenlong92/sdkit-go/core/ratelimit"
 	redisfacade "github.com/huwenlong92/sdkit-go/core/redis/facade"
@@ -14,6 +15,7 @@ import (
 type UseOption func(*useOptions)
 
 type useOptions struct {
+	explicitOnly bool
 	store        Store
 	redisClient  *goredis.Client
 	prefix       string
@@ -67,6 +69,8 @@ func WithExternal() UseOption {
 	}
 }
 
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.explicitOnly = !enabled } }
+
 func Use(opts ...UseOption) runtime.Capability {
 	o := defaultUseOptions()
 	for _, opt := range opts {
@@ -102,12 +106,26 @@ func Use(opts ...UseOption) runtime.Capability {
 			ownStore = true
 		}
 		runtimeStore = rateStore
-		coreratelimit.SetStore(rateStore)
-		return app.Container().Bind(runtime.Key(Name), rateStore)
+		bind := func() error {
+			if o.explicitOnly {
+				return app.Container().Bind(runtime.Key(Name), rateStore)
+			}
+			return runtime.BindProcessDefault(app, runtime.Key(Name), rateStore, func() { coreratelimit.SetStore(rateStore) }, func() { coreratelimit.SetStore(nil) })
+		}
+		if err := bind(); err != nil {
+			if ownStore {
+				closeErr := runtimeStore.Close()
+				runtimeStore = nil
+				return errors.Join(err, closeErr)
+			}
+			return err
+		}
+		return nil
 	}, func(context.Context) error {
-		coreratelimit.SetStore(nil)
 		if ownStore && runtimeStore != nil {
-			return runtimeStore.Close()
+			current := runtimeStore
+			runtimeStore = nil
+			return current.Close()
 		}
 		return nil
 	})

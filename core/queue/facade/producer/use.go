@@ -15,14 +15,15 @@ var ErrProducerConfigRequired = errors.New("queue producer facade: config or cli
 type UseOption func(*useOptions)
 
 type useOptions struct {
-	name         runtime.Key
-	config       Config
-	hasConfig    bool
-	configLoader ConfigLoader
-	producer     Producer
-	dependencies []runtime.Dependency
-	runtimeOpts  []queue.RuntimeInstanceOption
-	internal     bool
+	runtimeOptionsLoader func(*runtime.App) ([]queue.RuntimeInstanceOption, error)
+	name                 runtime.Key
+	config               Config
+	hasConfig            bool
+	configLoader         ConfigLoader
+	producer             Producer
+	dependencies         []runtime.Dependency
+	runtimeOpts          []queue.RuntimeInstanceOption
+	internal             bool
 }
 
 func WithName(name string) UseOption {
@@ -72,6 +73,10 @@ func WithInternal() UseOption {
 	}
 }
 
+func WithRuntimeOptionsLoader(loader func(*runtime.App) ([]queue.RuntimeInstanceOption, error)) UseOption {
+	return func(o *useOptions) { o.runtimeOptionsLoader = loader }
+}
+
 func Use(opts ...UseOption) runtime.Capability {
 	o := useOptions{name: runtime.Key(Name)}
 	for _, opt := range opts {
@@ -110,6 +115,14 @@ func Use(opts ...UseOption) runtime.Capability {
 			hasConfig = true
 		}
 
+		runtimeOpts := append([]queue.RuntimeInstanceOption(nil), o.runtimeOpts...)
+		if o.runtimeOptionsLoader != nil {
+			loaded, err := o.runtimeOptionsLoader(app)
+			if err != nil {
+				return err
+			}
+			runtimeOpts = append(runtimeOpts, loaded...)
+		}
 		producer := o.producer
 		if producer == nil && hasConfig {
 			if err := queuedriver.Register(); err != nil {
@@ -119,9 +132,9 @@ func Use(opts ...UseOption) runtime.Capability {
 			if err != nil {
 				return err
 			}
-			if len(o.runtimeOpts) > 0 {
+			if len(runtimeOpts) > 0 {
 				instanceOpts := []queue.RuntimeInstanceOption{queue.WithRuntimeMetadata(queue.RuntimeMetadataFromConfig("", "", config))}
-				instanceOpts = append(instanceOpts, o.runtimeOpts...)
+				instanceOpts = append(instanceOpts, runtimeOpts...)
 				producer = queue.NewRuntimeInstanceFromParts(queue.RuntimeParts{Client: client}, instanceOpts...)
 			} else {
 				producer = client
@@ -133,13 +146,21 @@ func Use(opts ...UseOption) runtime.Capability {
 		}
 
 		registered = producer
-		return app.Container().Bind(o.name, producer)
+		if err := app.Container().Bind(o.name, producer); err != nil {
+			if ownsProducer {
+				return errors.Join(err, registered.Close())
+			}
+			return err
+		}
+		return nil
 	}, func(context.Context) error {
 		if registered == nil {
 			return nil
 		}
 		if ownsProducer {
-			return registered.Close()
+			current := registered
+			registered = nil
+			return current.Close()
 		}
 		return nil
 	})

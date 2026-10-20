@@ -40,6 +40,8 @@ func TestUseRegistersCasbinCapability(t *testing.T) {
 	}
 
 	app := runtime.New()
+
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.RegisterCapabilities(capability); err != nil {
 		t.Fatalf("RegisterCapabilities() error = %v", err)
 	}
@@ -58,6 +60,8 @@ func TestUseConfigLoaderRunsAfterBootstrap(t *testing.T) {
 	t.Cleanup(func() { corecasbin.Default = nil })
 
 	app := runtime.New()
+
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	manager := &corecasbin.Manager{}
 	order := make([]string, 0, 2)
 	if err := app.RegisterCapabilities(

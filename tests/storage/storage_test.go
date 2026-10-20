@@ -133,6 +133,7 @@ func TestFacadeLoadsStorageConfigFromConfigLoader(t *testing.T) {
 	}
 
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	capability := storagecap.Use(storagecap.WithConfigLoader(func(*runtime.App) (storagecap.Config, error) {
 		return cfg, nil
 	}))
@@ -170,6 +171,7 @@ func TestFacadeUsesExplicitDefaultLocalConfig(t *testing.T) {
 	})
 
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	capability := storagecap.Use(storagecap.WithConfig(storagecap.DefaultConfig()))
 	if err := capability.Register(app); err != nil {
 		t.Fatalf("register storage: %v", err)

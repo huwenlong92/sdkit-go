@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/huwenlong92/sdkit-go/core/runtime"
@@ -44,8 +46,10 @@ type Config struct {
 }
 
 var (
-	L      *zap.Logger
-	global Config
+	L              *zap.Logger // Deprecated: use Default() for synchronized access.
+	globalMu       sync.RWMutex
+	managedDefault atomic.Pointer[zap.Logger]
+	global         Config
 )
 
 func Init(name, level, mode string) error {
@@ -54,18 +58,23 @@ func Init(name, level, mode string) error {
 
 func Configure(cfg Config) error {
 	cfg = normalizeConfig(cfg)
+	globalMu.Lock()
 	global = cfg
+	globalMu.Unlock()
 
 	l, err := New(cfg.Name)
 	if err != nil {
 		return err
 	}
+	SetManagedDefault(nil)
+	globalMu.Lock()
 	L = l
+	globalMu.Unlock()
 	return nil
 }
 
 func New(name string) (*zap.Logger, error) {
-	cfg := global
+	cfg := currentConfig()
 	cfg.Name = name
 	cfg = normalizeConfig(cfg)
 
@@ -80,18 +89,21 @@ func New(name string) (*zap.Logger, error) {
 }
 
 func Named(name string) *zap.Logger {
+	if log := managedDefault.Load(); log != nil {
+		return log.Named(name)
+	}
 	l, err := New(name)
 	if err != nil {
-		if L != nil {
-			return L
-		}
-		return zap.NewNop()
+		return Default()
 	}
 	return l
 }
 
 func Writer(name, filename string) (io.Writer, error) {
-	cfg := normalizeConfig(global)
+	return writerWithConfig(normalizeConfig(currentConfig()), name, filename)
+}
+
+func writerWithConfig(cfg Config, name, filename string) (io.Writer, error) {
 	dir := filepath.Join(cfg.RootDir, name)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
@@ -126,7 +138,7 @@ func WriteSyncer(name, filename string) (zapcore.WriteSyncer, error) {
 	}
 
 	writers := []zapcore.WriteSyncer{zapcore.AddSync(fileWriter)}
-	if normalizeConfig(global).Mode == "dev" {
+	if normalizeConfig(currentConfig()).Mode == "dev" {
 		writers = append([]zapcore.WriteSyncer{zapcore.AddSync(os.Stdout)}, writers...)
 	} else {
 		writers = append([]zapcore.WriteSyncer{zapcore.AddSync(os.Stderr)}, writers...)
@@ -172,9 +184,13 @@ func From(app *runtime.App) *zap.Logger {
 				return log
 			}
 		}
+		return zap.NewNop()
 	}
-	if L != nil {
-		return L
+	globalMu.RLock()
+	log := L
+	globalMu.RUnlock()
+	if log != nil {
+		return log
 	}
 	return zap.NewNop()
 }
@@ -203,9 +219,7 @@ func Error(msg string, err error, fields ...zap.Field) {
 }
 
 func Sync() {
-	if L != nil {
-		_ = L.Sync()
-	}
+	_ = Default().Sync()
 }
 
 func normalizeConfig(cfg Config) Config {
@@ -296,4 +310,19 @@ func hasErrorField(fields []zap.Field) bool {
 		}
 	}
 	return false
+}
+
+func currentConfig() Config { globalMu.RLock(); defer globalMu.RUnlock(); return global }
+
+// SetManagedDefault publishes a borrowed logger. Named loggers share its owned
+// writer, so per-request Named calls do not allocate untracked file handles.
+func SetManagedDefault(log *zap.Logger) {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+	managedDefault.Store(log)
+	if log == nil {
+		L = zap.NewNop()
+	} else {
+		L = log
+	}
 }

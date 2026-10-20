@@ -41,10 +41,20 @@ func (a *App) Stop(ctx context.Context) error {
 	if runtimeCancel != nil {
 		runtimeCancel()
 	}
-	err = errors.Join(
-		a.stopProviders(ctx, providers, ""),
-		a.shutdownCapabilities(ctx, capabilities),
-	)
+	providerErr := a.stopProviders(ctx, providers, "")
+	if defaultErr := a.releaseProcessDefaults(ctx); defaultErr != nil {
+		a.mu.Lock()
+		a.stopping = false
+		a.mu.Unlock()
+		return errors.Join(providerErr, defaultErr)
+	}
+	err = errors.Join(providerErr, a.shutdownCapabilities(ctx, capabilities))
+	a.Container().Clear()
+	// A timed-out shutdown may still be running. Keep its default reservations
+	// so a late callback cannot tear down a new App's process state.
+	if ctx.Err() == nil {
+		a.releaseDefaultReservations()
+	}
 
 	a.mu.Lock()
 	a.runningProviders = nil
@@ -68,6 +78,7 @@ func (a *App) prepareRunContext(ctxs ...context.Context) context.Context {
 	a.ctx = ctx
 	a.cancel = cancel
 	a.registeredCapabilities = nil
+	a.defaultReleaseDone = nil
 	a.runningProviders = nil
 	a.stopping = false
 	a.stopped = false

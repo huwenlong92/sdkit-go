@@ -17,6 +17,7 @@ var ErrConfigRequired = errors.New("database facade: config or database required
 type UseOption func(*useOptions)
 
 type useOptions struct {
+	explicitOnly bool
 	config       Config
 	hasConfig    bool
 	configLoader ConfigLoader
@@ -87,6 +88,9 @@ func WithExternal() UseOption {
 	}
 }
 
+// WithDefault controls publication of a process default. Disable it for isolated Apps.
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.explicitOnly = !enabled } }
+
 func Use(opts ...UseOption) runtime.Capability {
 	o := defaultUseOptions()
 	for _, opt := range opts {
@@ -137,7 +141,13 @@ func Use(opts ...UseOption) runtime.Capability {
 		if o.database == nil {
 			owned = db
 		}
-		if err := coredatabase.Bind(app, db); err != nil {
+		bind := func() error {
+			if o.explicitOnly {
+				return app.Container().Bind(runtime.Key(Name), db)
+			}
+			return coredatabase.Bind(app, db)
+		}
+		if err := bind(); err != nil {
 			if owned != nil {
 				err = errors.Join(err, owned.Close())
 				owned = nil

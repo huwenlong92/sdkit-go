@@ -81,12 +81,8 @@ func Close() {
 
 func replaceDefault(c Cache) {
 	defaultMu.Lock()
-	old := defaultCache
 	defaultCache = c
 	defaultMu.Unlock()
-	if old != nil && old != c {
-		_ = old.Close()
-	}
 }
 
 // ======================== 服务自定义 ========================

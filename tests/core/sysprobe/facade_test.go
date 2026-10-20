@@ -20,7 +20,7 @@ func TestFacadeOwnsSeparateInstancesAndDefault(t *testing.T) {
 		loads++
 		return facade.Config{Host: facade.HostConfig{CPUInterval: time.Millisecond}}, nil
 	}))
-	second := facade.Use(facade.WithName("second-probe"), facade.WithDefault(), facade.WithConfig(facade.Config{Host: facade.HostConfig{CPUInterval: time.Millisecond}}))
+	second := facade.Use(facade.WithName("second-probe"), facade.WithConfig(facade.Config{Host: facade.HostConfig{CPUInterval: time.Millisecond}}))
 	for _, cap := range []runtime.Capability{first, second} {
 		t.Cleanup(func() {
 			if err := cap.Shutdown(context.Background()); err != nil {

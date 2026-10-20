@@ -11,10 +11,13 @@ var ErrAppNil = errors.New("runtime: app is nil")
 var ErrAppRunning = errors.New("runtime: app run already in progress")
 
 type App struct {
-	container *Container
-	registry  *Registry
-	ctx       context.Context
-	cancel    context.CancelFunc
+	defaultReleases    []func()
+	defaultReleaseDone chan struct{}
+	defaultKeys        []Key
+	container          *Container
+	registry           *Registry
+	ctx                context.Context
+	cancel             context.CancelFunc
 
 	runMu                   sync.Mutex
 	lifecycleGate           chan struct{}
@@ -195,7 +198,7 @@ func (a *App) RunAllProviders(ctxs ...context.Context) (runErr error) {
 	defer a.runMu.Unlock()
 	// A completed job run can be invoked again; release its previous resources first.
 	a.mu.Lock()
-	previousRun := a.stopped || len(a.registeredCapabilities) > 0 || len(a.runningProviders) > 0
+	previousRun := a.stopped || a.defaultReleaseDone != nil || len(a.registeredCapabilities) > 0 || len(a.runningProviders) > 0
 	a.mu.Unlock()
 	if previousRun {
 		if err := a.Stop(context.Background()); err != nil {
@@ -286,7 +289,7 @@ func (a *App) RunProvider(name string, ctxs ...context.Context) (runErr error) {
 	defer a.runMu.Unlock()
 	// A completed job run can be invoked again; release its previous resources first.
 	a.mu.Lock()
-	previousRun := a.stopped || len(a.registeredCapabilities) > 0 || len(a.runningProviders) > 0
+	previousRun := a.stopped || a.defaultReleaseDone != nil || len(a.registeredCapabilities) > 0 || len(a.runningProviders) > 0
 	a.mu.Unlock()
 	if previousRun {
 		if err := a.Stop(context.Background()); err != nil {

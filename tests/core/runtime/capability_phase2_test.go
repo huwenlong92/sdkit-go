@@ -20,6 +20,7 @@ import (
 
 func TestPhase2CapabilityOrderIsStable(t *testing.T) {
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	var calls []string
 	if err := app.Use(
 		runtime.NewCapability("logger", func(*runtime.App) error {
@@ -49,6 +50,7 @@ func TestPhase2CapabilityOrderIsStable(t *testing.T) {
 
 func TestPhase2PlatformCapabilitiesBindResources(t *testing.T) {
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	log := zap.NewNop()
 	db := &database.Database{}
 	redisClient := &coreredis.RuntimeClient{}
@@ -86,6 +88,7 @@ func TestPhase2PlatformCapabilitiesBindResources(t *testing.T) {
 
 func TestPhase2ProvidersShareRuntimeCapabilityInstance(t *testing.T) {
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	db := &database.Database{}
 	t.Cleanup(database.Close)
 

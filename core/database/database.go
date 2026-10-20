@@ -15,9 +15,10 @@ import (
 var (
 	ErrNotInitialized = errors.New("database: not initialized")
 
-	Default *Database
-	DB      *gorm.DB
-	PGXPool *pgxpool.Pool
+	Default   *Database // Deprecated: use From(nil) for synchronized access.
+	defaultMu sync.RWMutex
+	DB        *gorm.DB
+	PGXPool   *pgxpool.Pool
 )
 
 type Database struct {
@@ -70,10 +71,9 @@ func New(ctx context.Context, cfg Config, mode string) (*Database, error) {
 }
 
 func Close() {
-	if Default != nil {
-		_ = Default.Close()
+	if db := From(nil); db != nil {
+		_ = db.Close()
 	}
-	setDefault(nil)
 }
 
 func (db *Database) Close() error {
@@ -82,9 +82,7 @@ func (db *Database) Close() error {
 	}
 	db.closeMu.Lock()
 	defer db.closeMu.Unlock()
-	if Default == db {
-		setDefault(nil)
-	}
+	clearDefault(db)
 	var errs []error
 	if db.PGX != nil {
 		db.PGX.Close()
@@ -108,4 +106,21 @@ func closeGORM(db *gorm.DB) error {
 		return err
 	}
 	return sqlDB.Close()
+}
+
+func (db *Database) gormHandle() *gorm.DB {
+	if db == nil {
+		return nil
+	}
+	db.closeMu.Lock()
+	defer db.closeMu.Unlock()
+	return db.Gorm
+}
+func (db *Database) pgxHandle() *pgxpool.Pool {
+	if db == nil {
+		return nil
+	}
+	db.closeMu.Lock()
+	defer db.closeMu.Unlock()
+	return db.PGX
 }

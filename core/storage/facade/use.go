@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 
 	"github.com/huwenlong92/sdkit-go/core/runtime"
 	corestorage "github.com/huwenlong92/sdkit-go/core/storage"
@@ -12,6 +13,7 @@ type ConfigLoader func(app *runtime.App) (Config, error)
 type UseOption func(*useOptions)
 
 type useOptions struct {
+	explicitOnly bool
 	config       Config
 	hasConfig    bool
 	configLoader ConfigLoader
@@ -72,6 +74,9 @@ func WithInternal() UseOption {
 	}
 }
 
+// WithDefault controls publication of a process default. Disable it for isolated Apps.
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.explicitOnly = !enabled } }
+
 func Use(opts ...UseOption) runtime.Capability {
 	o := defaultUseOptions()
 	for _, opt := range opts {
@@ -80,6 +85,7 @@ func Use(opts ...UseOption) runtime.Capability {
 		}
 	}
 
+	var owned *Manager
 	return runtime.NewCapabilityWithMetadataAndDependencies(runtime.CapabilityMetadata{
 		Name:        Name,
 		Description: "Storage manager",
@@ -108,8 +114,29 @@ func Use(opts ...UseOption) runtime.Capability {
 				return err
 			}
 		}
-		return corestorage.Bind(app, manager)
+		if o.manager == nil {
+			owned = manager
+		}
+		bind := func() error {
+			if o.explicitOnly {
+				return app.Container().Bind(runtime.Key(Name), manager)
+			}
+			return corestorage.Bind(app, manager)
+		}
+		if err := bind(); err != nil {
+			if owned != nil {
+				err = errors.Join(err, owned.Close())
+				owned = nil
+			}
+			return err
+		}
+		return nil
 	}, func(context.Context) error {
-		return corestorage.Close()
+		if owned == nil {
+			return nil
+		}
+		current := owned
+		owned = nil
+		return current.Close()
 	})
 }

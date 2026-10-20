@@ -12,6 +12,7 @@ import (
 type UseOption func(*useOptions)
 
 type useOptions struct {
+	explicitOnly bool
 	config       Config
 	hasConfig    bool
 	configLoader ConfigLoader
@@ -66,6 +67,9 @@ func WithExternal() UseOption {
 	}
 }
 
+// WithDefault(false) keeps the configured or injected logger isolated in its App.
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.explicitOnly = !enabled } }
+
 func Use(opts ...UseOption) runtime.Capability {
 	o := defaultUseOptions()
 	for _, opt := range opts {
@@ -74,6 +78,7 @@ func Use(opts ...UseOption) runtime.Capability {
 		}
 	}
 
+	var closeOwned func() error
 	return runtime.NewCapabilityWithMetadataAndDependencies(runtime.CapabilityMetadata{
 		Name:        Name,
 		Description: "Zap logger",
@@ -81,6 +86,11 @@ func Use(opts ...UseOption) runtime.Capability {
 		Scope:       runtime.ScopeGlobal,
 		Internal:    o.internal,
 	}, o.dependencies, func(app *runtime.App) error {
+		if !o.explicitOnly {
+			if err := runtime.BindProcessDefault(app, runtime.Key(Name), true, nil, func() { corelogger.SetManagedDefault(nil) }); err != nil {
+				return err
+			}
+		}
 		log := o.logger
 		if log == nil {
 			cfg := o.config
@@ -93,20 +103,27 @@ func Use(opts ...UseOption) runtime.Capability {
 				cfg = loaded
 				hasConfig = true
 			}
-			if !hasConfig && corelogger.L != nil {
-				log = corelogger.L
+			if !hasConfig && !o.explicitOnly {
+				log = corelogger.Default()
 			} else {
-				if err := corelogger.Configure(cfg); err != nil {
+				created, close, err := corelogger.NewManaged(cfg)
+				if err != nil {
 					return err
 				}
-				log = corelogger.L
+				log = created
+				closeOwned = close
 			}
-		} else {
-			corelogger.L = log
+		}
+		if !o.explicitOnly {
+			corelogger.SetManagedDefault(log)
 		}
 		return app.Container().Bind(runtime.Key(Name), log)
 	}, func(context.Context) error {
-		corelogger.Sync()
-		return nil
+		if closeOwned == nil {
+			return nil
+		}
+		close := closeOwned
+		closeOwned = nil
+		return close()
 	})
 }

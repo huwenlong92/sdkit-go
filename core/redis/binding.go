@@ -13,6 +13,7 @@ func From(app *runtime.App) *RuntimeClient {
 				return client
 			}
 		}
+		return nil
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -20,27 +21,20 @@ func From(app *runtime.App) *RuntimeClient {
 }
 
 func Bind(app *runtime.App, client *RuntimeClient) error {
-	if client == nil {
-		replaceDefault(nil)
-		if app == nil {
-			return nil
-		}
-		return runtime.ErrContainerValueNil
-	}
-	replaceDefault(client)
 	if app == nil {
+		replaceDefault(client)
 		return nil
 	}
-	return app.Container().Bind(KeyRedis, client)
+	if client == nil {
+		return runtime.ErrContainerValueNil
+	}
+	return runtime.BindProcessDefault(app, KeyRedis, client, func() { replaceDefault(client) }, func() { replaceDefault(nil) })
 }
 
 func replaceDefault(client *RuntimeClient) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	if Default != nil && Default != client {
-		_ = Default.Close()
-	}
 	Default = client
 	if client == nil {
 		RDB = nil

@@ -13,21 +13,18 @@ func From(app *runtime.App) Cache {
 				return c
 			}
 		}
+		return nil
 	}
 	return Default()
 }
 
 func Bind(app *runtime.App, c Cache) error {
-	if c == nil {
-		replaceDefault(nil)
-		if app == nil {
-			return nil
-		}
-		return runtime.ErrContainerValueNil
-	}
-	replaceDefault(c)
 	if app == nil {
+		replaceDefault(c)
 		return nil
 	}
-	return app.Container().Bind(KeyCache, c)
+	if c == nil {
+		return runtime.ErrContainerValueNil
+	}
+	return runtime.BindProcessDefault(app, KeyCache, c, func() { replaceDefault(c) }, func() { replaceDefault(nil) })
 }
