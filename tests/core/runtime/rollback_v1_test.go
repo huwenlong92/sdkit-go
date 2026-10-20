@@ -3,7 +3,8 @@ package tests
 import (
 	"context"
 	"errors"
-	"reflect"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,36 +12,73 @@ import (
 )
 
 func TestV1RegisterFailureRollsBackSuccessfulCapabilities(t *testing.T) {
-	for _, providerFailure := range []bool{false, true} {
-		t.Run(map[bool]string{false: "capability", true: "provider"}[providerFailure], func(t *testing.T) {
-			app := runtime.New()
-			failure := errors.New("register failed")
-			var calls []string
-			if err := app.Use(testCapability{name: "resource", register: func(*runtime.App) error { return nil }, shutdown: func(context.Context) error { calls = append(calls, "close"); return nil }}); err != nil {
-				t.Fatal(err)
+	for _, single := range []bool{false, true} {
+		for _, providerFailure := range []bool{false, true} {
+			for _, cleanupFails := range []bool{false, true} {
+				name := fmt.Sprintf("single=%t/provider=%t/cleanupError=%t", single, providerFailure, cleanupFails)
+				t.Run(name, func(t *testing.T) {
+					app := runtime.New()
+					failure := errors.New("register failed")
+					closeFailure := errors.New("close failed")
+					var closes atomic.Int32
+					cleanup := func(context.Context) error {
+						closes.Add(1)
+						if cleanupFails {
+							return closeFailure
+						}
+						return nil
+					}
+					if err := app.Use(testCapability{name: "resource", register: func(*runtime.App) error { return nil }, shutdown: cleanup}); err != nil {
+						t.Fatal(err)
+					}
+					provider := testProvider{name: "service", dependencies: []runtime.Dependency{runtime.Require("resource")}}
+					if providerFailure {
+						provider.register = func(*runtime.App) error { return failure }
+					} else {
+						if err := app.Use(testCapability{name: "broken", dependencies: []runtime.Dependency{runtime.Require("resource")}, register: func(*runtime.App) error { return failure }}); err != nil {
+							t.Fatal(err)
+						}
+						provider.dependencies = append(provider.dependencies, runtime.Require("broken"))
+					}
+					if err := app.Register(provider); err != nil {
+						t.Fatal(err)
+					}
+					done := make(chan error, 1)
+					started := time.Now()
+					go func() {
+						if single {
+							done <- app.RunProvider("service")
+						} else {
+							done <- app.RunAllProviders()
+						}
+					}()
+					var runErr error
+					select {
+					case runErr = <-done:
+					case <-time.After(2 * time.Second):
+						t.Fatal("rollback waited for lifecycle gate; must finish before default 10s Stop timeout")
+					}
+					if !errors.Is(runErr, failure) || errors.Is(runErr, context.DeadlineExceeded) {
+						t.Fatalf("Run=%v", runErr)
+					}
+					if errors.Is(runErr, closeFailure) != cleanupFails {
+						t.Fatalf("cleanup error lost: %v", runErr)
+					}
+					if closes.Load() != 1 {
+						t.Fatalf("close count=%d, want 1", closes.Load())
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					defer cancel()
+					if err := app.Stop(ctx); errors.Is(err, closeFailure) != cleanupFails || errors.Is(err, context.DeadlineExceeded) {
+						t.Fatalf("Stop=%v", err)
+					}
+					if closes.Load() != 1 {
+						t.Fatalf("repeat Stop closed %d times", closes.Load())
+					}
+					t.Logf("rollback and repeated Stop completed in %s", time.Since(started))
+				})
 			}
-			if providerFailure {
-				if err := app.Register(testProvider{name: "service", register: func(*runtime.App) error { return failure }}); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if err := app.Use(testCapability{name: "broken", register: func(*runtime.App) error { return failure }}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := app.Run(); !errors.Is(err, failure) {
-				t.Fatalf("Run=%v, want %v", err, failure)
-			}
-			if !reflect.DeepEqual(calls, []string{"close"}) {
-				t.Fatalf("cleanup=%v, want [close]", calls)
-			}
-			if err := app.Stop(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			if len(calls) != 1 {
-				t.Fatalf("cleanup count=%d, want 1", len(calls))
-			}
-		})
+		}
 	}
 }
 

@@ -108,13 +108,13 @@ go run .
 
 `Use(...)` 和既有 `From` 入口继续保留。新代码可使用 `runtime.ResolveCapability[T](serviceContext, name)` 获取必需能力，或 `OptionalCapability[T]` 区分缺失与类型错误；`ResolveAppCapability[T]` 另保留初始化失败原因。服务本地名称优先于共享名称，解析结果为借用资源。
 
-Queue 可通过 `producer.Resolve(serviceContext)` 获取投递接口，通过 `operations.Resolve(serviceContext)` 获取运维接口。Crontab 的 `ResolveOperations(serviceContext)` 返回不包含启动和关闭方法的管理接口；原 `Service` 接口保持兼容。
+Queue 可通过 `producer.Resolve(serviceContext)` 获取投递接口，通过 `operations.Resolve(serviceContext)` 获取运维接口。Crontab 的 `ResolveOperations(serviceContext)` 返回不包含启动和关闭方法的管理接口；原 `Service` 接口保持兼容。Crontab 解锁错误会与执行错误一起返回；执行成功但解锁失败时，最终状态为失败。
 
-创建资源的 capability 负责关闭；`WithDatabase`、`WithProducer` 注入的资源由调用者关闭。`LocalCapabilityRegistry.Set` 保留原有所有权语义，Runtime 注入使用 `SetBorrowed`，同一可比较实例的别名只关闭一次。显式指定 App 查询数据库时，不再回退到另一个 App 的默认实例。
+创建资源的 capability 负责关闭；`WithDatabase`、`WithProducer` 注入的资源由调用者关闭。`LocalCapabilityRegistry.Set` 保留原有所有权语义，Runtime 注入使用 `SetBorrowed`，同一可比较实例的别名只关闭一次。同名替换只更新查询结果，已由 `Set` 接管的旧资源保留到 registry 关闭时按逆序回收；后续 `SetBorrowed` 不撤销已有所有权。显式指定 App 查询数据库时，不再回退到另一个 App 的默认实例。
 
 初始化失败会回滚已成功注册的资源。重复停止保留首次关闭错误；忽略 context 的用户回调无法被 Go 强制终止。`Health.Ready` 与 `StatusRunning` 分开，阻塞服务只有实现 `ReadinessProvider` 并关闭就绪通道后才报告 ready；旧服务的 readiness 未知时保持 false。
 
-Session 的 Set Hook 在凭据持久化前执行，失败清空会话并发送过期 Cookie；Hook 应使用传入 Session 的暂存值，不能依赖凭据已写入响应。跨 Redis 与 Cookie 的副作用不具备分布式事务保证。Auth 的刷新失败会执行全部失败清理，保留原始错误和清理错误。
+Session 的 Set Hook 在凭据持久化前执行，失败清空会话并发送过期 Cookie；Hook 应使用传入 Session 的暂存值，不能依赖凭据已写入响应。多个 Session Hook 按顺序执行并在首个错误处停止；跨 Redis 与 Cookie 的副作用不具备分布式事务保证。Auth 的刷新失败会执行全部失败清理，保留原始错误和清理错误。
 
 ## 目录结构
 

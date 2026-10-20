@@ -222,6 +222,8 @@ func (a *App) RunAllProviders(ctxs ...context.Context) (runErr error) {
 	if err != nil {
 		return err
 	}
+	// This defer must run before the earlier rollback defer calls Stop,
+	// which acquires the same lifecycle gate on registration failure.
 	defer release()
 
 	providers := a.Providers()
@@ -311,6 +313,8 @@ func (a *App) RunProvider(name string, ctxs ...context.Context) (runErr error) {
 	if err != nil {
 		return err
 	}
+	// This defer must run before the earlier rollback defer calls Stop,
+	// which acquires the same lifecycle gate on registration failure.
 	defer release()
 
 	registeredProviders := a.Providers()

@@ -3,6 +3,8 @@ package tests
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/huwenlong92/sdkit-go/core/runtime"
@@ -100,5 +102,66 @@ func TestV1ServiceCapabilitiesKeepSharedScope(t *testing.T) {
 	}
 	if caps[0].Metadata().Scope != runtime.ScopeGlobal || caps[1].Metadata().Scope != runtime.ScopeServiceLocal {
 		t.Fatalf("scopes=%s,%s", caps[0].Metadata().Scope, caps[1].Metadata().Scope)
+	}
+}
+
+func TestV1RegistryReplacementRetainsOwnedResources(t *testing.T) {
+	for _, borrowed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("borrowed=%t", borrowed), func(t *testing.T) {
+			registry := runtime.NewLocalCapabilityRegistry()
+			first, second := &v1Closer{}, &v1Closer{}
+			registry.Set("resource", first)
+			if borrowed {
+				registry.SetBorrowed("resource", second)
+			} else {
+				registry.Set("resource", second)
+			}
+			if got, ok := registry.Get("resource"); !ok || got != second {
+				t.Fatal("replacement not visible")
+			}
+			if first.count != 0 || second.count != 0 {
+				t.Fatal("replacement closed resources still in use")
+			}
+			for i := 0; i < 2; i++ {
+				if err := registry.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			wantSecond := 1
+			if borrowed {
+				wantSecond = 0
+			}
+			if first.count != 1 || second.count != wantSecond {
+				t.Fatalf("closed first=%d second=%d", first.count, second.count)
+			}
+		})
+	}
+}
+func TestV1RegistryBorrowedAliasDoesNotRevokeOwnership(t *testing.T) {
+	registry := runtime.NewLocalCapabilityRegistry()
+	owned := &v1Closer{}
+	registry.Set("resource", owned)
+	registry.SetBorrowed("resource", owned)
+	registry.Set("alias", owned)
+	if err := registry.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if owned.count != 1 {
+		t.Fatalf("close count=%d", owned.count)
+	}
+}
+
+func TestV1ReplacedCapabilityCloseOrderAndErrors(t *testing.T) {
+	registry := runtime.NewLocalCapabilityRegistry()
+	firstErr, secondErr := errors.New("old close"), errors.New("new close")
+	var closed []string
+	registry.Set("resource", testLocalCapability{close: func() error { closed = append(closed, "old"); return firstErr }})
+	registry.Set("resource", testLocalCapability{close: func() error { closed = append(closed, "new"); return secondErr }})
+	err := registry.Close()
+	if !errors.Is(err, firstErr) || !errors.Is(err, secondErr) || !reflect.DeepEqual(closed, []string{"new", "old"}) {
+		t.Fatalf("closed=%v err=%v", closed, err)
+	}
+	if err := registry.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
