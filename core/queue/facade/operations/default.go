@@ -52,3 +52,15 @@ func OperationsFromServiceContext(ctx ServiceContext) (*queue.OperationsRuntime,
 	}
 	return runtime.Operations(), true
 }
+
+// Resolve returns only management operations. The capability retains resource ownership.
+func Resolve(ctx ServiceContext) (*queue.OperationsRuntime, error) {
+	instance, err := runtime.ResolveCapability[*queue.RuntimeInstance](ctx, Name)
+	if err != nil {
+		return nil, err
+	}
+	if instance.Operations() == nil {
+		return nil, queue.ErrNotInitialized
+	}
+	return instance.Operations(), nil
+}

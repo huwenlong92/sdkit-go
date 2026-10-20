@@ -28,7 +28,7 @@ func (c *Container) Bind(key Key, value any) error {
 	if key == "" {
 		return ErrContainerKeyRequired
 	}
-	if value == nil {
+	if isNilCapabilityValue(value) {
 		return ErrContainerValueNil
 	}
 	c.values.Store(key, value)

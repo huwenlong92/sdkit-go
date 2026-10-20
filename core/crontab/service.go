@@ -2,9 +2,8 @@ package crontab
 
 import "context"
 
-type Service interface {
-	Start(ctx context.Context) error
-	Shutdown(ctx context.Context) error
+// Operations is the management API; callers cannot start or shut down the scheduler.
+type Operations interface {
 	Reload(ctx context.Context) error
 
 	ListTemplates(ctx context.Context) ([]TemplateInfo, error)
@@ -28,4 +27,11 @@ type Service interface {
 	ListRuns(ctx context.Context, filter RunFilter) ([]RunLog, error)
 	ListRunLogs(ctx context.Context, filter RunLogFilter) ([]LogEvent, error)
 	StreamLogs(ctx context.Context, filter LogFilter) (<-chan LogEvent, error)
+}
+
+// Service retains the original combined API for compatibility.
+type Service interface {
+	Operations
+	Start(context.Context) error
+	Shutdown(context.Context) error
 }

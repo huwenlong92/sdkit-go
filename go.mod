@@ -1,6 +1,6 @@
 module github.com/huwenlong92/sdkit-go
 
-go 1.25.10
+go 1.27.3
 
 require (
 	github.com/aliyun/alibaba-cloud-sdk-go v1.62.330
@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.17
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.101.0
 	github.com/aws/smithy-go v1.25.1
-	github.com/bytedance/sonic v1.15.1
+	github.com/bytedance/sonic v1.15.4
 	github.com/casbin/casbin/v2 v2.135.0
 	github.com/containerd/errdefs v1.0.0
 	github.com/gin-contrib/sessions v1.1.0
@@ -65,7 +65,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
 	github.com/boj/redistore v1.4.1 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
-	github.com/bytedance/sonic/loader v0.5.1 // indirect
+	github.com/bytedance/sonic/loader v0.5.2 // indirect
 	github.com/casbin/govaluate v1.10.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

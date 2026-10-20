@@ -111,7 +111,9 @@ func (r *Registry) Dispatch(ctx context.Context, entry *Entry) error {
 		if runCtx != nil {
 			runCtx.Result = result
 		}
-		finishRuntime(runCtx, ctx, entryValue, tpl, result, startedAt, finishedAt, runningWritten)
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		finishRuntime(runCtx, finishCtx, entryValue, tpl, result, startedAt, finishedAt, runningWritten)
 		logRuntimeResult(ctx, runCtx, entryValue, tpl, result, duration)
 		notifyFailure(ctx, entryValue, tpl, startedAt, finishedAt, duration, result)
 	}()
@@ -314,7 +316,9 @@ func acquireRuntimeLock(ctx context.Context, runCtx *RunContext, entry Entry, tp
 	stopRefresh := runCtx.runner.refreshLock(ctx, lock, ttl)
 	return func() {
 		stopRefresh()
-		_ = lock.Unlock(ctx)
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = lock.Unlock(unlockCtx)
 	}, nil
 }
 

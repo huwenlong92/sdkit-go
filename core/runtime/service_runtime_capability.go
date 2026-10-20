@@ -67,6 +67,7 @@ func normalizeRuntimeCapabilityContext[T any](ctx RuntimeCapabilityContext[T]) R
 type serviceLocalRuntimeCapability struct {
 	CapabilityContract
 	serviceType string
+	serviceName string
 }
 
 func (c serviceLocalRuntimeCapability) Name() string {
@@ -81,6 +82,8 @@ func (c serviceLocalRuntimeCapability) Metadata() CapabilityMetadata {
 	if metadata.Group == "" {
 		metadata.Group = c.serviceType
 	}
-	metadata.Scope = ScopeServiceLocal
+	if metadata.Scope == "" || (c.serviceName != "" && strings.HasPrefix(metadata.Name, c.serviceName+".")) {
+		metadata.Scope = ScopeServiceLocal
+	}
 	return metadata
 }

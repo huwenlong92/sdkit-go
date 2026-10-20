@@ -172,6 +172,7 @@ func (r *ServiceRegistry[T]) RuntimeCapabilitiesForService(ctx RuntimeCapability
 		out = append(out, serviceLocalRuntimeCapability{
 			CapabilityContract: capability,
 			serviceType:        ctx.Type,
+			serviceName:        ctx.Name,
 		})
 	}
 	return out

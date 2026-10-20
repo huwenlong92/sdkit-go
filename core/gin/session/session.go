@@ -113,10 +113,15 @@ func SetWith(c *gin.Context, key string, value any, opts Options, hooks ...Hook)
 	finalOpts := optionsWith(c, opts)
 	applyOptions(s, opts, finalOpts)
 	s.Set(key, value)
-	if err := s.Save(); err != nil {
-		return err
+	// Validate lifecycle hooks before issuing a credential. Hooks see staged values.
+	if err := runHooks(c, s, finalOpts, hooks...); err != nil {
+		s.Clear()
+		expired := finalOpts
+		expired.MaxAge = -1
+		s.Options(expired)
+		return errors.Join(err, s.Save())
 	}
-	return runHooks(c, s, finalOpts, hooks...)
+	return s.Save()
 }
 
 func Get(c *gin.Context, key string) any {

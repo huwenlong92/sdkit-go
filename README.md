@@ -33,7 +33,7 @@
 
 ## 环境与安装
 
-当前 `go.mod` 要求 Go **1.25.10 或更高版本**。
+当前 `go.mod` 要求 Go **1.27.3 或更高版本**。
 
 在消费方项目中添加依赖：
 
@@ -103,6 +103,18 @@ go run .
 ```
 
 `dev` 模式下日志同时输出到控制台，文件日志默认写入 `logs/`。更完整的应用可以通过各模块的 `facade` 接入 `core/runtime`，统一管理启动、依赖和停止过程。
+
+## Runtime 能力接入与所有权
+
+`Use(...)` 和既有 `From` 入口继续保留。新代码可使用 `runtime.ResolveCapability[T](serviceContext, name)` 获取必需能力，或 `OptionalCapability[T]` 区分缺失与类型错误；`ResolveAppCapability[T]` 另保留初始化失败原因。服务本地名称优先于共享名称，解析结果为借用资源。
+
+Queue 可通过 `producer.Resolve(serviceContext)` 获取投递接口，通过 `operations.Resolve(serviceContext)` 获取运维接口。Crontab 的 `ResolveOperations(serviceContext)` 返回不包含启动和关闭方法的管理接口；原 `Service` 接口保持兼容。
+
+创建资源的 capability 负责关闭；`WithDatabase`、`WithProducer` 注入的资源由调用者关闭。`LocalCapabilityRegistry.Set` 保留原有所有权语义，Runtime 注入使用 `SetBorrowed`，同一可比较实例的别名只关闭一次。显式指定 App 查询数据库时，不再回退到另一个 App 的默认实例。
+
+初始化失败会回滚已成功注册的资源。重复停止保留首次关闭错误；忽略 context 的用户回调无法被 Go 强制终止。`Health.Ready` 与 `StatusRunning` 分开，阻塞服务只有实现 `ReadinessProvider` 并关闭就绪通道后才报告 ready；旧服务的 readiness 未知时保持 false。
+
+Session 的 Set Hook 在凭据持久化前执行，失败清空会话并发送过期 Cookie；Hook 应使用传入 Session 的暂存值，不能依赖凭据已写入响应。跨 Redis 与 Cookie 的副作用不具备分布式事务保证。Auth 的刷新失败会执行全部失败清理，保留原始错误和清理错误。
 
 ## 目录结构
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -13,19 +14,23 @@ func (a *App) Stop(ctx context.Context) error {
 	if a == nil {
 		return ErrAppNil
 	}
-	a.stopMu.Lock()
-	defer a.stopMu.Unlock()
-
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	ctx, cancel := withDefaultStopTimeout(ctx)
 	defer cancel()
+	a.cancelRuntimeContext()
+	release, err := a.lockLifecycle(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	a.mu.Lock()
 	if a.stopped {
+		err := a.stopErr
 		a.mu.Unlock()
-		return nil
+		return err
 	}
 	a.stopping = true
 	providers := append([]Provider(nil), a.runningProviders...)
@@ -33,18 +38,19 @@ func (a *App) Stop(ctx context.Context) error {
 	runtimeCancel := a.cancel
 	a.mu.Unlock()
 
-	err := errors.Join(
-		a.stopProviders(ctx, providers, ""),
-		a.shutdownCapabilities(ctx, capabilities),
-	)
 	if runtimeCancel != nil {
 		runtimeCancel()
 	}
+	err = errors.Join(
+		a.stopProviders(ctx, providers, ""),
+		a.shutdownCapabilities(ctx, capabilities),
+	)
 
 	a.mu.Lock()
 	a.runningProviders = nil
 	a.registeredCapabilities = nil
 	a.stopped = true
+	a.stopErr = err
 	a.stopping = false
 	a.mu.Unlock()
 
@@ -55,8 +61,6 @@ func (a *App) prepareRunContext(ctxs ...context.Context) context.Context {
 	parent := context.Background()
 	if len(ctxs) > 0 && ctxs[0] != nil {
 		parent = ctxs[0]
-	} else if a.ctx != nil {
-		parent = a.ctx
 	}
 	ctx, cancel := context.WithCancel(parent)
 
@@ -67,6 +71,7 @@ func (a *App) prepareRunContext(ctxs ...context.Context) context.Context {
 	a.runningProviders = nil
 	a.stopping = false
 	a.stopped = false
+	a.stopErr = nil
 	a.mu.Unlock()
 	a.resetRuntimeStatuses()
 
@@ -112,13 +117,14 @@ type providerStartResult struct {
 }
 
 func (a *App) startProviders(ctx context.Context, providers []Provider) error {
-	started := make([]Provider, 0, len(providers))
 	serviceResults := make(chan providerStartResult, len(providers))
 	serviceCount := 0
 
 	for _, provider := range providers {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		setObjectStatus(provider, StatusBooting, nil)
-		a.addRunningProvider(provider)
 
 		if providerMode(provider) == ProviderModeService {
 			serviceCount++
@@ -129,7 +135,6 @@ func (a *App) startProviders(ctx context.Context, providers []Provider) error {
 				}
 			}(provider)
 			setObjectStatus(provider, StatusRunning, nil)
-			started = append(started, provider)
 			continue
 		}
 
@@ -138,19 +143,13 @@ func (a *App) startProviders(ctx context.Context, providers []Provider) error {
 				return nil
 			}
 			setObjectStatus(provider, StatusFailed, err)
-			rollback := append(started, provider)
-			a.cancelRuntimeContext()
-			stopCtx, cancel := withDefaultStopTimeout(context.Background())
-			_ = a.stopProviders(stopCtx, rollback, providerName(provider))
-			cancel()
-			a.clearRunningProviders()
+
 			return err
 		}
 		if a.isStopping() {
 			return nil
 		}
 		setObjectStatus(provider, StatusRunning, nil)
-		started = append(started, provider)
 	}
 
 	if serviceCount == 0 {
@@ -240,6 +239,9 @@ func runLifecycle(ctx context.Context, fn func(context.Context) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	done := make(chan error, 1)
 	go func() {
 		done <- fn(ctx)
@@ -260,4 +262,21 @@ func withDefaultStopTimeout(ctx context.Context) (context.Context, context.Cance
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, DefaultStopTimeout)
+}
+
+// lockLifecycle serializes construction and destruction without ignoring Stop deadlines.
+func (a *App) lockLifecycle(ctx context.Context) (func(), error) {
+	a.mu.Lock()
+	if a.lifecycleGate == nil {
+		a.lifecycleGate = make(chan struct{}, 1)
+	}
+	gate := a.lifecycleGate
+	a.mu.Unlock()
+	select {
+	case gate <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-gate }) }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

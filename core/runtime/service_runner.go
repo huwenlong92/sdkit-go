@@ -365,7 +365,7 @@ func (p *managedServiceProvider[T]) serviceCapabilities(app *App) *LocalCapabili
 		}
 		if app != nil {
 			if value, ok := app.Container().Get(Key(name)); ok {
-				registry.Set(name, value)
+				registry.SetBorrowed(name, value)
 				continue
 			}
 		}

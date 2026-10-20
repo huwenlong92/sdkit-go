@@ -3,6 +3,7 @@ package crontab
 import (
 	"context"
 	"os"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -105,7 +106,10 @@ func (r *Runner) refreshLock(ctx context.Context, lock Lock, ttl time.Duration) 
 		return func() {}
 	}
 	stop := make(chan struct{})
+	done := make(chan struct{})
+	var once sync.Once
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -119,7 +123,7 @@ func (r *Runner) refreshLock(ctx context.Context, lock Lock, ttl time.Duration) 
 			}
 		}
 	}()
-	return func() { close(stop) }
+	return func() { once.Do(func() { close(stop) }); <-done }
 }
 
 func (r *Runner) LastRunStatus(jobID string) Status {

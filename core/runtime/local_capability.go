@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"reflect"
 	"sync"
 )
 
@@ -16,6 +17,7 @@ type localCapabilityCloser interface {
 type LocalCapabilityRegistry struct {
 	mu        sync.RWMutex
 	instances map[string]any
+	borrowed  map[string]bool
 	names     []string
 }
 
@@ -53,6 +55,25 @@ func (r *LocalCapabilityRegistry) Set(name string, instance any) {
 		r.instances = make(map[string]any)
 	}
 	r.instances[name] = instance
+	delete(r.borrowed, name)
+}
+
+// SetBorrowed exposes an instance whose lifecycle belongs to its runtime capability.
+func (r *LocalCapabilityRegistry) SetBorrowed(name string, instance any) {
+	if r == nil || name == "" || isNilCapabilityValue(instance) {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.addNameLocked(name)
+	if r.instances == nil {
+		r.instances = make(map[string]any)
+	}
+	if r.borrowed == nil {
+		r.borrowed = make(map[string]bool)
+	}
+	r.instances[name] = instance
+	r.borrowed[name] = true
 }
 
 func (r *LocalCapabilityRegistry) Get(name string) (any, bool) {
@@ -88,14 +109,26 @@ func (r *LocalCapabilityRegistry) Close() error {
 	r.mu.Lock()
 	names := closeOrder(r.names)
 	instances := r.instances
+	borrowed := r.borrowed
 	r.instances = nil
+	r.borrowed = nil
 	r.mu.Unlock()
 
 	var errs []error
+	closed := make(map[any]struct{})
 	for _, name := range names {
-		closer, ok := instances[name].(localCapabilityCloser)
-		if !ok || closer == nil {
+		if borrowed[name] {
 			continue
+		}
+		closer, ok := instances[name].(localCapabilityCloser)
+		if !ok || isNilCapabilityValue(closer) {
+			continue
+		}
+		if reflect.TypeOf(closer).Comparable() {
+			if _, seen := closed[closer]; seen {
+				continue
+			}
+			closed[closer] = struct{}{}
 		}
 		if err := closer.Close(); err != nil {
 			errs = append(errs, err)
