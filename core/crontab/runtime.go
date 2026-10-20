@@ -84,7 +84,7 @@ func (rt *Runtime) Dispatch(ctx context.Context, entry *Entry) error {
 	return rt.registry.Dispatch(ctx, entry)
 }
 
-func (r *Registry) Dispatch(ctx context.Context, entry *Entry) error {
+func (r *Registry) Dispatch(ctx context.Context, entry *Entry) (dispatchErr error) {
 	ctx = normalizeContext(ctx)
 	startedAt := time.Now()
 	runCtx, _ := RunContextFromContext(ctx)
@@ -111,7 +111,9 @@ func (r *Registry) Dispatch(ctx context.Context, entry *Entry) error {
 		if runCtx != nil {
 			runCtx.Result = result
 		}
-		finishRuntime(runCtx, ctx, entryValue, tpl, result, startedAt, finishedAt, runningWritten)
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		finishRuntime(runCtx, finishCtx, entryValue, tpl, result, startedAt, finishedAt, runningWritten)
 		logRuntimeResult(ctx, runCtx, entryValue, tpl, result, duration)
 		notifyFailure(ctx, entryValue, tpl, startedAt, finishedAt, duration, result)
 	}()
@@ -162,7 +164,15 @@ func (r *Registry) Dispatch(ctx context.Context, entry *Entry) error {
 		result = lockErr.result
 		return runtimeResultError(result)
 	}
-	defer unlock()
+	defer func() {
+		if err := unlock(); err != nil {
+			result.Err = errors.Join(result.Err, err)
+			if result.Status == StatusSuccess {
+				result.Status = StatusFailed
+			}
+			dispatchErr = runtimeResultError(result)
+		}
+	}()
 
 	logRuntimeStart(ctx, runCtx, entryValue, tpl)
 	if err := writeRuntimeRunning(runCtx, ctx, tpl); err != nil {
@@ -278,15 +288,15 @@ type runtimeLockError struct {
 	result RunResult
 }
 
-func acquireRuntimeLock(ctx context.Context, runCtx *RunContext, entry Entry, tpl Template, job Job, timeout time.Duration) (func(), *runtimeLockError) {
+func acquireRuntimeLock(ctx context.Context, runCtx *RunContext, entry Entry, tpl Template, job Job, timeout time.Duration) (func() error, *runtimeLockError) {
 	if tpl.AllowOverlap {
-		return func() {}, nil
+		return func() error { return nil }, nil
 	}
 	if runCtx == nil || runCtx.runner == nil {
-		return func() {}, nil
+		return func() error { return nil }, nil
 	}
 	if !runCtx.runner.cfg.Lock.Enabled {
-		return func() {}, nil
+		return func() error { return nil }, nil
 	}
 
 	key := runtimeLockKey(entry)
@@ -303,18 +313,20 @@ func acquireRuntimeLock(ctx context.Context, runCtx *RunContext, entry Entry, tp
 
 	lock, ok, err := runCtx.runner.locker.TryLock(ctx, key, ttl)
 	if err != nil {
-		return func() {}, &runtimeLockError{result: RunResult{Status: StatusFailed, Err: err}}
+		return func() error { return nil }, &runtimeLockError{result: RunResult{Status: StatusFailed, Err: err}}
 	}
 	if !ok {
-		return func() {}, &runtimeLockError{result: RunResult{Status: StatusLocked, Err: ErrJobRunning}}
+		return func() error { return nil }, &runtimeLockError{result: RunResult{Status: StatusLocked, Err: ErrJobRunning}}
 	}
 	if lock == nil {
-		return func() {}, nil
+		return func() error { return nil }, nil
 	}
 	stopRefresh := runCtx.runner.refreshLock(ctx, lock, ttl)
-	return func() {
+	return func() error {
 		stopRefresh()
-		_ = lock.Unlock(ctx)
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		return lock.Unlock(unlockCtx)
 	}, nil
 }
 

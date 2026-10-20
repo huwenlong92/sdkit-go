@@ -133,9 +133,6 @@ func Use(opts ...UseOption) runtime.Capability {
 		}
 
 		registered = producer
-		if o.producer != nil {
-			ownsProducer = true
-		}
 		return app.Container().Bind(o.name, producer)
 	}, func(context.Context) error {
 		if registered == nil {

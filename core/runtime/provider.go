@@ -70,3 +70,20 @@ func isReservedProviderName(name string) bool {
 		return false
 	}
 }
+
+// ReadinessProvider reports when a blocking service can accept work.
+// A nil or open channel is not ready. A service must close it only after initialization.
+type ReadinessProvider interface{ Ready() <-chan struct{} }
+
+func providerReady(provider ProviderContract) bool {
+	ready, ok := provider.(ReadinessProvider)
+	if !ok {
+		return false
+	}
+	select {
+	case <-ready.Ready():
+		return true
+	default:
+		return false
+	}
+}

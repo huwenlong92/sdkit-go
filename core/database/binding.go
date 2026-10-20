@@ -19,6 +19,7 @@ func From(app *runtime.App) *Database {
 				return db
 			}
 		}
+		return nil
 	}
 	return Default
 }
@@ -42,6 +43,9 @@ func GormFrom(app *runtime.App) *gorm.DB {
 	if db := From(app); db != nil {
 		return db.Gorm
 	}
+	if app != nil {
+		return nil
+	}
 	return DB
 }
 
@@ -60,6 +64,9 @@ func Gorm(ctxs ...context.Context) *gorm.DB {
 func PGXFrom(app *runtime.App) *pgxpool.Pool {
 	if db := From(app); db != nil {
 		return db.PGX
+	}
+	if app != nil {
+		return nil
 	}
 	return PGXPool
 }

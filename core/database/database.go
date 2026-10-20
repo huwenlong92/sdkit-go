@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/huwenlong92/sdkit-go/core/logger"
 
@@ -20,9 +21,10 @@ var (
 )
 
 type Database struct {
-	Gorm   *gorm.DB
-	PGX    *pgxpool.Pool
-	Config Config
+	closeMu sync.Mutex
+	Gorm    *gorm.DB
+	PGX     *pgxpool.Pool
+	Config  Config
 }
 
 func Init(cfg Config, mode string) error {
@@ -77,6 +79,11 @@ func Close() {
 func (db *Database) Close() error {
 	if db == nil {
 		return nil
+	}
+	db.closeMu.Lock()
+	defer db.closeMu.Unlock()
+	if Default == db {
+		setDefault(nil)
 	}
 	var errs []error
 	if db.PGX != nil {

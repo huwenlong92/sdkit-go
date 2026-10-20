@@ -9,6 +9,8 @@ import (
 	jwt "github.com/golang-jwt/jwt/v5"
 )
 
+var ErrSessionCleanup = errors.New("auth: session failure cleanup failed")
+
 type JWTAuthenticator struct {
 	cfg               JWTConfig
 	extractor         Extractor
@@ -200,7 +202,7 @@ func (a *SessionAuthenticator) AuthenticateRequest(ctx context.Context, r *http.
 		return nil, a.fail(ctx, r, err)
 	}
 	if err := runIdentityHooks(ctx, identity, raw, a.Refresher, a.Refreshers); err != nil {
-		return nil, err
+		return nil, a.fail(ctx, r, err)
 	}
 	return identity, nil
 }
@@ -222,7 +224,7 @@ func (a *SessionAuthenticator) fail(ctx context.Context, r *http.Request, err er
 			continue
 		}
 		if hookErr := hook(ctx, r, err); hookErr != nil {
-			return hookErr
+			err = errors.Join(err, ErrSessionCleanup, hookErr)
 		}
 	}
 	return err
@@ -266,7 +268,10 @@ func (a *ChainAuthenticator) AuthenticateRequest(ctx context.Context, r *http.Re
 		if err == nil && identity != nil {
 			return identity, nil
 		}
-		if !errors.Is(err, ErrUnauthorized) {
+		if err == nil {
+			err = ErrUnauthorized
+		}
+		if errors.Is(err, ErrSessionCleanup) || !errors.Is(err, ErrUnauthorized) {
 			return nil, err
 		}
 		lastErr = err

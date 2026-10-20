@@ -95,6 +95,7 @@ func Use(opts ...UseOption) runtime.Capability {
 		}
 	}
 
+	var owned *Database
 	return runtime.NewCapabilityWithMetadataAndDependencies(runtime.CapabilityMetadata{
 		Name:        Name,
 		Description: "GORM and pgx database",
@@ -133,13 +134,24 @@ func Use(opts ...UseOption) runtime.Capability {
 				return err
 			}
 		}
+		if o.database == nil {
+			owned = db
+		}
 		if err := coredatabase.Bind(app, db); err != nil {
+			if owned != nil {
+				err = errors.Join(err, owned.Close())
+				owned = nil
+			}
 			return err
 		}
 		loggerfacade.From(app).Info("数据库连接成功", zap.String(corelogger.TraceIDKey, ""))
 		return nil
 	}, func(context.Context) error {
-		coredatabase.Close()
-		return nil
+		if owned == nil {
+			return nil
+		}
+		db := owned
+		owned = nil
+		return db.Close()
 	})
 }

@@ -44,6 +44,15 @@ func TestDefaultRunCommandMetadataAndArgs(t *testing.T) {
 }
 
 func TestDefaultServeCommandWaitsForManagedProviderStop(t *testing.T) {
+	testManagedCommandWaitsForStop(t, false)
+}
+
+func TestDefaultRunCommandWaitsForManagedProviderStop(t *testing.T) {
+	testManagedCommandWaitsForStop(t, true)
+}
+
+func testManagedCommandWaitsForStop(t *testing.T, single bool) {
+	t.Helper()
 	app := runtime.New()
 	started := make(chan struct{})
 	stopped := make(chan struct{})
@@ -66,7 +75,11 @@ func TestDefaultServeCommandWaitsForManagedProviderStop(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runtime.NewServeCommand().Run(context.Background(), app, nil)
+		if single {
+			done <- runtime.NewRunCommand().Run(context.Background(), app, []string{"api"})
+		} else {
+			done <- runtime.NewServeCommand().Run(context.Background(), app, nil)
+		}
 	}()
 
 	select {
@@ -77,7 +90,7 @@ func TestDefaultServeCommandWaitsForManagedProviderStop(t *testing.T) {
 	select {
 	case err := <-done:
 		t.Fatalf("serve command returned before app stop: %v", err)
-	default:
+	case <-time.After(25 * time.Millisecond):
 	}
 
 	if err := app.Stop(context.Background()); err != nil {

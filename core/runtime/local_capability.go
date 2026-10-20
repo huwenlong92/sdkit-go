@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"reflect"
 	"sync"
 )
 
@@ -16,6 +17,7 @@ type localCapabilityCloser interface {
 type LocalCapabilityRegistry struct {
 	mu        sync.RWMutex
 	instances map[string]any
+	owned     []localCapabilityCloser
 	names     []string
 }
 
@@ -53,6 +55,26 @@ func (r *LocalCapabilityRegistry) Set(name string, instance any) {
 		r.instances = make(map[string]any)
 	}
 	r.instances[name] = instance
+	// Keep ownership until Close even if a later registration replaces this name.
+	// Previously returned instances may still be in use by the service.
+	if closer, ok := instance.(localCapabilityCloser); ok && !isNilCapabilityValue(closer) {
+		r.owned = append(r.owned, closer)
+	}
+}
+
+// SetBorrowed exposes an instance whose lifecycle belongs to its runtime capability.
+// It does not relinquish ownership of resources previously registered with Set.
+func (r *LocalCapabilityRegistry) SetBorrowed(name string, instance any) {
+	if r == nil || name == "" || isNilCapabilityValue(instance) {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.addNameLocked(name)
+	if r.instances == nil {
+		r.instances = make(map[string]any)
+	}
+	r.instances[name] = instance
 }
 
 func (r *LocalCapabilityRegistry) Get(name string) (any, bool) {
@@ -86,16 +108,20 @@ func (r *LocalCapabilityRegistry) Close() error {
 		return nil
 	}
 	r.mu.Lock()
-	names := closeOrder(r.names)
-	instances := r.instances
+	owned := r.owned
 	r.instances = nil
+	r.owned = nil
 	r.mu.Unlock()
 
 	var errs []error
-	for _, name := range names {
-		closer, ok := instances[name].(localCapabilityCloser)
-		if !ok || closer == nil {
-			continue
+	closed := make(map[any]struct{})
+	for i := len(owned) - 1; i >= 0; i-- {
+		closer := owned[i]
+		if reflect.TypeOf(closer).Comparable() {
+			if _, seen := closed[closer]; seen {
+				continue
+			}
+			closed[closer] = struct{}{}
 		}
 		if err := closer.Close(); err != nil {
 			errs = append(errs, err)
@@ -120,26 +146,6 @@ func (r *LocalCapabilityRegistry) Names() []string {
 	names := make([]string, 0, len(r.names))
 	seen := make(map[string]struct{}, len(r.names))
 	for _, name := range r.names {
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		names = append(names, name)
-	}
-	return names
-}
-
-func closeOrder(items []string) []string {
-	if len(items) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(items))
-	names := make([]string, 0, len(items))
-	for i := len(items) - 1; i >= 0; i-- {
-		name := items[i]
 		if name == "" {
 			continue
 		}

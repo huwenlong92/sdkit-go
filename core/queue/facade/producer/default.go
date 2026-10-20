@@ -47,3 +47,8 @@ func RuntimeFromServiceContext(ctx ServiceContext) *queue.RuntimeInstance {
 	}
 	return queue.NewRuntimeInstanceFromParts(queue.RuntimeParts{Client: client})
 }
+
+// Resolve returns a borrowed producer without constructing or exposing a worker runtime.
+func Resolve(ctx ServiceContext) (Producer, error) {
+	return runtime.ResolveCapability[Producer](ctx, Name)
+}

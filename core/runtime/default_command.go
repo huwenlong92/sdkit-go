@@ -115,6 +115,10 @@ func hasRuntimeManagedProvider(providers []Provider) bool {
 }
 
 func isRuntimeManagedProvider(provider Provider) bool {
-	managed, ok := provider.(runtimeManagedProvider)
+	var contract ProviderContract = provider
+	if wrapped, ok := provider.(*runtimeProvider); ok && wrapped != nil {
+		contract = wrapped.ProviderContract
+	}
+	managed, ok := contract.(runtimeManagedProvider)
 	return ok && managed.RuntimeManaged()
 }

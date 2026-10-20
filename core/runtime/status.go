@@ -17,6 +17,8 @@ const (
 )
 
 type Health struct {
+	// Ready requires successful initialization and, for service providers, an explicit readiness signal.
+	Ready  bool
 	Name   string
 	Status Status
 	Error  error
@@ -57,7 +59,7 @@ func (s *runtimeStatus) Health(name string) Health {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return Health{Name: name, Status: normalizeStatus(s.status), Error: s.err}
+	return Health{Name: name, Status: normalizeStatus(s.status), Error: s.err, Ready: s.status == StatusRunning && s.err == nil}
 }
 
 func normalizeStatus(status Status) Status {
@@ -172,7 +174,11 @@ func (p *runtimeProvider) runtimeHealth(name string) Health {
 	if p == nil {
 		return Health{Name: name, Status: StatusStopped}
 	}
-	return p.state.Health(name)
+	health := p.state.Health(name)
+	if providerMode(p.ProviderContract) == ProviderModeService {
+		health.Ready = health.Ready && providerReady(p.ProviderContract)
+	}
+	return health
 }
 
 func setObjectStatus(object any, status Status, err error) {
