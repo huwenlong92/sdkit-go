@@ -49,7 +49,7 @@ func Lock(locker queue.Locker, keyFns ...LockKeyFunc) queue.Middleware {
 				unlockCtx, cancel := context.WithTimeout(context.Background(), defaultUnlockTimeout)
 				defer cancel()
 				if unlockErr := unlock(unlockCtx); unlockErr != nil {
-					queueLogger(ctx, logger.L).Error("队列任务释放锁失败",
+					queueLogger(ctx, logger.Default()).Error("队列任务释放锁失败",
 						append(messageFields(msg),
 							zap.String("lock_key", key),
 							zap.Error(unlockErr),

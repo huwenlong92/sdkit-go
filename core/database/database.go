@@ -33,17 +33,17 @@ func Init(cfg Config, mode string) error {
 }
 
 func InitWithConfig(cfg Config, mode string) error {
-	logger.L.Info("正在初始化数据库连接")
+	logger.Default().Info("正在初始化数据库连接")
 
 	db, err := New(context.Background(), cfg, mode)
 	if err != nil {
-		logger.L.Error("数据库连接失败", zap.Error(err))
+		logger.Default().Error("数据库连接失败", zap.Error(err))
 		return err
 	}
 
 	setDefault(db)
 
-	logger.L.Info("数据库连接成功")
+	logger.Default().Info("数据库连接成功")
 	return nil
 }
 

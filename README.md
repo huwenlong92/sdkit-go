@@ -106,6 +106,17 @@ go run .
 
 ## Runtime 能力接入与所有权
 
+Provider 声明依赖，Bootstrap 注册公共工厂，Runtime 初始化与管理生命周期；普通业务直接使用已初始化的 Core API：
+
+```go
+tasks, err := queue.ListTasks(ctx, query)
+entries, err := crontab.ListEntries(ctx)
+err = database.Transaction(ctx, func(tx *gorm.DB) error { return nil })
+```
+
+这些入口已在 v0.1.30 提供。普通业务不重复获取 Operations，也不负责关闭公共能力。读取数据库、Redis、日志使用 `database.Gorm(ctx)`、`redis.Client()`、`logger.Default()`；导出的可变默认变量仅保留兼容。Auth/Session 保留请求级状态与 context，多 App、ServiceLocal 和特殊实例通过装配显式传入。显式 `redis.ClientFrom(app)` 未找到本 App 实例时返回 nil，`nil` App 才读取进程默认。
+
+
 `Use(...)` 和既有 `From` 入口继续保留。新代码可使用 `runtime.ResolveCapability[T](serviceContext, name)` 获取必需能力，或 `OptionalCapability[T]` 区分缺失与类型错误；`ResolveAppCapability[T]` 另保留初始化失败原因。服务本地名称优先于共享名称，解析结果为借用资源。
 
 Queue 可通过 `producer.Resolve(serviceContext)` 获取投递接口，通过 `operations.Resolve(serviceContext)` 获取运维接口。Crontab 的 `ResolveOperations(serviceContext)` 返回不包含启动和关闭方法的管理接口；原 `Service` 接口保持兼容。Crontab 解锁错误会与执行错误一起返回；执行成功但解锁失败时，最终状态为失败。
