@@ -89,6 +89,7 @@ func Use(opts ...UseOption) runtime.Capability {
 		}
 	}
 
+	initialized := false
 	return runtime.NewCapabilityWithMetadataAndDependencies(runtime.CapabilityMetadata{
 		Name:        Name,
 		Description: "OpenTelemetry tracing",
@@ -96,6 +97,9 @@ func Use(opts ...UseOption) runtime.Capability {
 		Scope:       runtime.ScopeGlobal,
 		Internal:    o.internal,
 	}, o.dependencies, func(app *runtime.App) error {
+		if err := runtime.BindProcessDefault(app, runtime.Key(Name), true, func() {}, func() {}); err != nil {
+			return err
+		}
 		cfg := o.config
 		if o.configLoader != nil {
 			loaded, err := o.configLoader(app)
@@ -119,6 +123,7 @@ func Use(opts ...UseOption) runtime.Capability {
 			log.Error("Tracing初始化失败", zap.String(corelogger.TraceIDKey, ""), zap.Error(err))
 			return err
 		}
+		initialized = true
 		if cfg.Enabled {
 			log.Info("Tracing初始化成功",
 				zap.String(corelogger.TraceIDKey, ""),
@@ -128,6 +133,10 @@ func Use(opts ...UseOption) runtime.Capability {
 		}
 		return nil
 	}, func(ctx context.Context) error {
+		if !initialized {
+			return nil
+		}
+		initialized = false
 		return coretracing.Shutdown(ctx)
 	})
 }

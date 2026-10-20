@@ -13,7 +13,12 @@ type ServiceRunner[T any] struct {
 	options   ServiceRunnerOptions[T]
 }
 
+// CapabilityFactory constructs a fresh capability for one App. It must not read
+// live resources; resolve them from the App during Register instead.
+type CapabilityFactory func() CapabilityContract
+
 type ServiceRunnerOptions[T any] struct {
+	CapabilityFactories map[string]CapabilityFactory
 	Bootstrap           *ServiceBootstrap[T]
 	LoadSpecs           ServiceSpecLoader
 	ResolveSpec         ServiceSpecResolver
@@ -105,11 +110,15 @@ func (r *ServiceRunner[T]) NewApp(options ServiceRunOptions) (*App, error) {
 			return nil, err
 		}
 	}
+	if err := r.registerRequiredCapabilities(app, selection); err != nil {
+		return nil, err
+	}
 	providers := make([]ProviderContract, 0, len(selection.Services))
 	for _, item := range selection.Services {
 		providers = append(providers, &managedServiceProvider[T]{
-			runner:    r,
-			selection: item,
+			runner:       r,
+			selection:    item,
+			capabilities: r.Bootstrap().RuntimeCapabilitiesForService(NewRuntimeCapabilityContextWithBaseLoader(item.ConfigFile, item.Name, item.Type, item.ConfigKey, r.baseConfig)),
 		})
 	}
 	if len(providers) > 0 {
@@ -232,9 +241,10 @@ func serviceSelectionNames(specs map[string]ServiceSpec, requested []string) []s
 }
 
 type managedServiceProvider[T any] struct {
-	runner    *ServiceRunner[T]
-	selection ServiceSelectionItem
-	service   Service
+	runner       *ServiceRunner[T]
+	selection    ServiceSelectionItem
+	service      Service
+	capabilities []CapabilityContract
 }
 
 func (p *managedServiceProvider[T]) Name() string {
@@ -336,18 +346,10 @@ func (p *managedServiceProvider[T]) RuntimeManaged() bool {
 }
 
 func (p *managedServiceProvider[T]) RuntimeCapabilities() []CapabilityContract {
-	if p == nil || p.runner == nil || p.runner.Bootstrap() == nil {
+	if p == nil {
 		return nil
 	}
-	return p.runner.Bootstrap().RuntimeCapabilitiesForService(
-		NewRuntimeCapabilityContextWithBaseLoader(
-			p.selection.ConfigFile,
-			p.selection.Name,
-			p.selection.Type,
-			p.selection.ConfigKey,
-			p.runner.baseConfig,
-		),
-	)
+	return append([]CapabilityContract(nil), p.capabilities...)
 }
 
 func (p *managedServiceProvider[T]) serviceCapabilities(app *App) *LocalCapabilityRegistry {
@@ -357,6 +359,14 @@ func (p *managedServiceProvider[T]) serviceCapabilities(app *App) *LocalCapabili
 	}
 	if registry == nil {
 		registry = NewLocalCapabilityRegistry()
+	}
+	// Shared capabilities are borrowed just like service-declared instances.
+	for _, dependency := range p.Dependencies() {
+		if app != nil {
+			if value, ok := app.Container().Get(Key(dependency.Name)); ok {
+				registry.SetBorrowed(dependency.Name, value)
+			}
+		}
 	}
 	for _, capability := range p.RuntimeCapabilities() {
 		name := capabilityName(capability)
@@ -479,4 +489,57 @@ func dedupeServiceDependencies(deps []Dependency) []Dependency {
 		out = append(out, dep)
 	}
 	return out
+}
+
+// registerRequiredCapabilities expands declared dependencies using the composition
+// root factories once per App. SortCapabilities remains responsible for ordering
+// and missing-dependency/cycle validation.
+func (r *ServiceRunner[T]) registerRequiredCapabilities(app *App, selection ServiceSelection) error {
+	seen := make(map[string]bool)
+	var add func(string) error
+	add = func(name string) error {
+		if seen[name] {
+			return nil
+		}
+		seen[name] = true
+		if _, exists := app.Capability(name); exists {
+			return nil
+		}
+		factory := r.options.CapabilityFactories[name]
+		if factory == nil {
+			return nil
+		}
+		capability := factory()
+		if capability == nil {
+			return ErrCapabilityNil
+		}
+		if capabilityName(capability) != name {
+			return fmt.Errorf("runtime: factory %s returned capability %s", name, capabilityName(capability))
+		}
+		if err := app.RegisterCapabilities(capability); err != nil {
+			return err
+		}
+		for _, dependency := range capability.Dependencies() {
+			if dependency.Required {
+				if err := add(dependency.Name); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	for _, item := range selection.Services {
+		dependencies := append([]Dependency(nil), item.Dependencies...)
+		if r.options.Dependencies != nil {
+			dependencies = append(dependencies, r.options.Dependencies(item)...)
+		}
+		for _, dependency := range dependencies {
+			if dependency.Required {
+				if err := add(dependency.Name); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }

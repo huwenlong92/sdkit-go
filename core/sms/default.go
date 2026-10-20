@@ -12,12 +12,8 @@ var (
 
 func SetDefault(manager *Manager) {
 	defaultMu.Lock()
-	old := defaultManager
 	defaultManager = manager
 	defaultMu.Unlock()
-	if old != nil && old != manager {
-		_ = old.Close()
-	}
 }
 
 func ManagerDefault() (*Manager, error) {

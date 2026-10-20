@@ -3,6 +3,7 @@ package casbin
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/huwenlong92/sdkit-go/core/database"
 	"github.com/huwenlong92/sdkit-go/core/logger"
@@ -30,12 +31,14 @@ type Config struct {
 }
 
 type Manager struct {
+	mu       sync.RWMutex
 	db       *database.Database
 	enforcer *gocasbin.Enforcer
 	config   Config
 }
 
-var Default *Manager
+var Default *Manager // Deprecated: use From(nil) for synchronized access.
+var defaultMu sync.RWMutex
 
 func Init(db *database.Database, cfg Config) error {
 	return InitContext(context.Background(), db, cfg)
@@ -101,19 +104,27 @@ func From(app *runtime.App) *Manager {
 				return manager
 			}
 		}
+		return nil
 	}
+	defaultMu.RLock()
+	defer defaultMu.RUnlock()
 	return Default
 }
 
 func Bind(app *runtime.App, manager *Manager) error {
-	setDefault(manager)
 	if app == nil {
+		setDefault(manager)
 		return nil
 	}
-	return app.Container().Bind(KeyCasbin, manager)
+	if manager == nil {
+		return runtime.ErrContainerValueNil
+	}
+	return runtime.BindProcessDefault(app, KeyCasbin, manager, func() { setDefault(manager) }, func() { setDefault(nil) })
 }
 
 func setDefault(manager *Manager) {
+	defaultMu.Lock()
+	defer defaultMu.Unlock()
 	Default = manager
 }
 
@@ -125,7 +136,12 @@ func (m *Manager) Enforcer() *gocasbin.Enforcer {
 }
 
 func (m *Manager) Enforce(sub, obj, act string) (bool, error) {
-	if m == nil || m.enforcer == nil {
+	if m == nil {
+		return true, nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.enforcer == nil {
 		return true, nil
 	}
 	return m.enforcer.Enforce(sub, obj, act)
@@ -136,7 +152,12 @@ func (m *Manager) Reload() {
 }
 
 func (m *Manager) ReloadContext(ctx context.Context) {
-	if m == nil || m.enforcer == nil {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.enforcer == nil {
 		return
 	}
 	if ctx == nil {
@@ -147,8 +168,8 @@ func (m *Manager) ReloadContext(ctx context.Context) {
 }
 
 func Reload() {
-	if Default != nil {
-		Default.Reload()
+	if manager := From(nil); manager != nil {
+		manager.Reload()
 	}
 }
 

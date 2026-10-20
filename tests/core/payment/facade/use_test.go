@@ -14,6 +14,8 @@ func TestUseWithSetupRegistersDefaultService(t *testing.T) {
 	t.Cleanup(payment.Close)
 
 	app := runtime.New()
+
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	capability := paymentfacade.Use(
 		paymentfacade.WithSetup(func(app *runtime.App, registry *payment.Registry) error {
 			return registry.Register(mock.New(
@@ -65,6 +67,8 @@ func TestUseLoadsChannelBindingsFromConfigLoader(t *testing.T) {
 	t.Cleanup(payment.Close)
 
 	app := runtime.New()
+
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	capability := paymentfacade.Use(
 		paymentfacade.WithConfigLoader(func(app *runtime.App) (paymentfacade.Config, error) {
 			return paymentfacade.Config{

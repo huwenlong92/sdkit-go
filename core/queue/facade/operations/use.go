@@ -15,13 +15,15 @@ var ErrOperationsConfigRequired = errors.New("queue operations facade: config re
 type UseOption func(*useOptions)
 
 type useOptions struct {
-	name         runtime.Key
-	config       Config
-	hasConfig    bool
-	configLoader ConfigLoader
-	dependencies []runtime.Dependency
-	runtimeOpts  []queue.RuntimeInstanceOption
-	internal     bool
+	bindDefault          bool
+	runtimeOptionsLoader func(*runtime.App) ([]queue.RuntimeInstanceOption, error)
+	name                 runtime.Key
+	config               Config
+	hasConfig            bool
+	configLoader         ConfigLoader
+	dependencies         []runtime.Dependency
+	runtimeOpts          []queue.RuntimeInstanceOption
+	internal             bool
 }
 
 func WithName(name string) UseOption {
@@ -59,6 +61,14 @@ func WithInternal() UseOption {
 	return func(o *useOptions) {
 		o.internal = true
 	}
+}
+
+// WithDefault opts into the process operations API; isolated instances keep it disabled.
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.bindDefault = enabled } }
+
+// WithRuntimeOptionsLoader resolves dependencies after capability initialization.
+func WithRuntimeOptionsLoader(loader func(*runtime.App) ([]queue.RuntimeInstanceOption, error)) UseOption {
+	return func(o *useOptions) { o.runtimeOptionsLoader = loader }
 }
 
 func Use(opts ...UseOption) runtime.Capability {
@@ -99,6 +109,14 @@ func Use(opts ...UseOption) runtime.Capability {
 		if !hasConfig {
 			return ErrOperationsConfigRequired
 		}
+		runtimeOpts := append([]queue.RuntimeInstanceOption(nil), o.runtimeOpts...)
+		if o.runtimeOptionsLoader != nil {
+			loaded, err := o.runtimeOptionsLoader(app)
+			if err != nil {
+				return err
+			}
+			runtimeOpts = append(runtimeOpts, loaded...)
+		}
 		queueCfg := cfg.Queue
 		if err := queuedriver.Register(); err != nil {
 			return err
@@ -117,14 +135,26 @@ func Use(opts ...UseOption) runtime.Capability {
 			metadata = queue.RuntimeMetadataFromConfig("", "", queueCfg)
 		}
 		instanceOpts := []queue.RuntimeInstanceOption{queue.WithRuntimeMetadata(metadata)}
-		instanceOpts = append(instanceOpts, o.runtimeOpts...)
+		instanceOpts = append(instanceOpts, runtimeOpts...)
 		registered = queue.NewRuntimeInstanceFromParts(queue.RuntimeParts{Client: client, Manager: manager}, instanceOpts...)
-		return app.Container().Bind(o.name, registered)
+		if err := app.Container().Bind(o.name, registered); err != nil {
+			return errors.Join(err, registered.Close())
+		}
+		if o.bindDefault {
+			if err := queue.BindDefaultOperations(app, registered); err != nil {
+				closeErr := registered.Close()
+				registered = nil
+				return errors.Join(err, closeErr)
+			}
+		}
+		return nil
 	}, func(context.Context) error {
 		if registered == nil {
 			return nil
 		}
-		return registered.Close()
+		current := registered
+		registered = nil
+		return current.Close()
 	})
 }
 

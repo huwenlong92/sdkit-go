@@ -83,11 +83,7 @@ func newRuntimeCapability(capability CapabilityContract) Capability {
 	if capability == nil {
 		return nil
 	}
-	if c, ok := capability.(Capability); ok {
-		if _, ok := c.(runtimeStatusController); ok {
-			return c
-		}
-	}
+	// Runtime health belongs to the App registry, never to a shared declaration.
 	return &runtimeCapability{
 		CapabilityContract: capability,
 		state:              newRuntimeStatus(),

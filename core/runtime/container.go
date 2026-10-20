@@ -46,3 +46,10 @@ func (c *Container) MustGet(key Key) any {
 	value, _ := c.Get(key)
 	return value
 }
+
+// Clear removes borrowed references after App shutdown; it never closes values.
+func (c *Container) Clear() {
+	if c != nil {
+		c.values.Clear()
+	}
+}

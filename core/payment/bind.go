@@ -11,22 +11,19 @@ func From(app *runtime.App) *Service {
 				return service
 			}
 		}
+		return nil
 	}
 	service, _ := Default()
 	return service
 }
 
 func Bind(app *runtime.App, service *Service) error {
-	if service == nil {
-		SetDefault(nil)
-		if app == nil {
-			return nil
-		}
-		return runtime.ErrContainerValueNil
-	}
-	SetDefault(service)
 	if app == nil {
+		SetDefault(service)
 		return nil
 	}
-	return app.Container().Bind(KeyPayment, service)
+	if service == nil {
+		return runtime.ErrContainerValueNil
+	}
+	return runtime.BindProcessDefault(app, KeyPayment, service, func() { SetDefault(service) }, func() { SetDefault(nil) })
 }

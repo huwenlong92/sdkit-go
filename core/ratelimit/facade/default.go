@@ -12,6 +12,7 @@ func From(app *runtime.App) Store {
 				return store
 			}
 		}
+		return nil
 	}
-	return coreratelimit.CustomStore
+	return coreratelimit.StoreDefault()
 }

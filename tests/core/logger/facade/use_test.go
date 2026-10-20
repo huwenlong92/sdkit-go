@@ -31,6 +31,7 @@ func TestUseWithLoggerBindsInjectedLogger(t *testing.T) {
 
 	log := zap.NewNop()
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(loggerfacade.Use(loggerfacade.WithLogger(log))); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}

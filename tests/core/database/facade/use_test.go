@@ -24,6 +24,7 @@ func TestUseDefaultsToInternal(t *testing.T) {
 
 func TestUseRequiresConfigOrDatabase(t *testing.T) {
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(databasefacade.Use()); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}
@@ -37,6 +38,7 @@ func TestUseWithDatabaseSkipsConfig(t *testing.T) {
 
 	db := &coredatabase.Database{}
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(databasefacade.Use(databasefacade.WithDatabase(db))); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}

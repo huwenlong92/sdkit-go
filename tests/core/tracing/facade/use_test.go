@@ -27,6 +27,8 @@ func TestUseWithoutConfigInitializesNoopTracing(t *testing.T) {
 	})
 
 	app := runtime.New()
+
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(tracingfacade.Use()); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}

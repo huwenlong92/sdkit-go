@@ -11,21 +11,18 @@ func From(app *runtime.App) Publisher {
 				return publisher
 			}
 		}
+		return nil
 	}
 	return DefaultPublisher()
 }
 
 func Bind(app *runtime.App, publisher Publisher) error {
-	if publisher == nil {
-		SetDefaultPublisher(nil)
-		if app == nil {
-			return nil
-		}
-		return runtime.ErrContainerValueNil
-	}
-	SetDefaultPublisher(publisher)
 	if app == nil {
+		SetDefaultPublisher(publisher)
 		return nil
 	}
-	return app.Container().Bind(KeyRealtime, publisher)
+	if publisher == nil {
+		return runtime.ErrContainerValueNil
+	}
+	return runtime.BindProcessDefault(app, KeyRealtime, publisher, func() { SetDefaultPublisher(publisher) }, func() { SetDefaultPublisher(nil) })
 }

@@ -245,6 +245,7 @@ func TestDriverErrors(t *testing.T) {
 func TestRuntimeUseBindsEventBusCapability(t *testing.T) {
 	resetDefault(t)
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(eventbuscap.Use(eventbuscap.WithConfig(eventbuscap.Config{Driver: eventbuscap.DriverMemory}))); err != nil {
 		t.Fatalf("Use: %v", err)
 	}

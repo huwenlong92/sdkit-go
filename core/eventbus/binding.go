@@ -11,6 +11,7 @@ func From(app *runtime.App) Service {
 				return service
 			}
 		}
+		return nil
 	}
 	return Default()
 }
@@ -20,11 +21,11 @@ func Bind(app *runtime.App, bus Service) error {
 }
 
 func BindWithDriver(app *runtime.App, bus Service, driver string) error {
+	if app == nil {
+		SetDefaultWithDriver(bus, driver)
+		return nil
+	}
 	if bus == nil {
-		SetDefaultWithDriver(nil, "")
-		if app == nil {
-			return nil
-		}
 		return runtime.ErrContainerValueNil
 	}
 	defaultBus := bus
@@ -33,9 +34,5 @@ func BindWithDriver(app *runtime.App, bus Service, driver string) error {
 			defaultBus = inner
 		}
 	}
-	SetDefaultWithDriver(defaultBus, driver)
-	if app == nil {
-		return nil
-	}
-	return app.Container().Bind(KeyEventBus, bus)
+	return runtime.BindProcessDefault(app, KeyEventBus, bus, func() { SetDefaultWithDriver(defaultBus, driver) }, func() { SetDefaultWithDriver(nil, "") })
 }

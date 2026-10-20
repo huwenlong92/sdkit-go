@@ -10,41 +10,46 @@ import (
 
 // TableName 获取模型表名（含 GORM TablePrefix，不含 schema，不带 SQL 引号）。
 func TableName(model interface{}) string {
-	if Default == nil {
+	db := From(nil)
+	if db == nil {
 		return ""
 	}
-	return Default.TableName(model)
+	return db.TableName(model)
 }
 
 // SchemaName 获取模型所在 schema。模型未声明 schema 时返回配置中的默认 schema。
 func SchemaName(model interface{}) string {
-	if Default == nil {
+	db := From(nil)
+	if db == nil {
 		return ""
 	}
-	return Default.SchemaName(model)
+	return db.SchemaName(model)
 }
 
 // TablePath 获取模型完整表名（含 schema，不带 SQL 引号）。
 func TablePath(model interface{}) string {
-	if Default == nil {
+	db := From(nil)
+	if db == nil {
 		return ""
 	}
-	return Default.TablePath(model)
+	return db.TablePath(model)
 }
 
 // Table 获取模型的 SQL 安全表名，可直接拼接到原生 SQL 的标识符位置。
 func Table(model interface{}) string {
-	if Default == nil {
+	db := From(nil)
+	if db == nil {
 		return ""
 	}
-	return Default.Table(model)
+	return db.Table(model)
 }
 
 func (db *Database) TableName(model any) string {
-	if db == nil || db.Gorm == nil {
+	gormDB := db.gormHandle()
+	if gormDB == nil {
 		return ""
 	}
-	stmt := &gorm.Statement{DB: db.Gorm}
+	stmt := &gorm.Statement{DB: gormDB}
 	if err := stmt.Parse(model); err != nil {
 		return ""
 	}
@@ -53,10 +58,11 @@ func (db *Database) TableName(model any) string {
 }
 
 func (db *Database) SchemaName(model any) string {
-	if db == nil || db.Gorm == nil {
+	gormDB := db.gormHandle()
+	if gormDB == nil {
 		return ""
 	}
-	stmt := &gorm.Statement{DB: db.Gorm}
+	stmt := &gorm.Statement{DB: gormDB}
 	if err := stmt.Parse(model); err != nil {
 		return ""
 	}
@@ -68,10 +74,11 @@ func (db *Database) SchemaName(model any) string {
 }
 
 func (db *Database) TablePath(model any) string {
-	if db == nil || db.Gorm == nil {
+	gormDB := db.gormHandle()
+	if gormDB == nil {
 		return ""
 	}
-	stmt := &gorm.Statement{DB: db.Gorm}
+	stmt := &gorm.Statement{DB: gormDB}
 	if err := stmt.Parse(model); err != nil {
 		return ""
 	}
@@ -94,17 +101,19 @@ func (db *Database) Table(model any) string {
 }
 
 func TablePathWithName(model any, table string) string {
-	if Default == nil {
+	db := From(nil)
+	if db == nil {
 		return table
 	}
-	return Default.TablePathWithName(model, table)
+	return db.TablePathWithName(model, table)
 }
 
 func TableWithName(model any, table string) string {
-	if Default == nil {
+	db := From(nil)
+	if db == nil {
 		return QuoteTablePath(table)
 	}
-	return Default.TableWithName(model, table)
+	return db.TableWithName(model, table)
 }
 
 func (db *Database) TablePathWithName(model any, table string) string {

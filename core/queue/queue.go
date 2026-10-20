@@ -22,7 +22,8 @@ func New(cfg Config, opts ...RuntimeOption) QueueRunner {
 }
 
 func Enqueue(ctx context.Context, task Task, opts ...Option) (*TaskInfo, error) {
-	runtime := Runtime(ctx)
+	runtime, release := acquireRuntime(ctx)
+	defer release()
 	if runtime == nil {
 		return nil, ErrNotInitialized
 	}
@@ -30,7 +31,8 @@ func Enqueue(ctx context.Context, task Task, opts ...Option) (*TaskInfo, error) 
 }
 
 func RequeueTaskRecord(ctx context.Context, record TaskRecord) (*TaskInfo, error) {
-	runtime := Runtime(ctx)
+	runtime, release := acquireRuntime(ctx)
+	defer release()
 	if runtime == nil {
 		return nil, ErrNotInitialized
 	}
@@ -38,7 +40,8 @@ func RequeueTaskRecord(ctx context.Context, record TaskRecord) (*TaskInfo, error
 }
 
 func DispatchAutoRetryTasks(ctx context.Context, limit int) (int, error) {
-	runtime := Runtime(ctx)
+	runtime, release := acquireRuntime(ctx)
+	defer release()
 	if runtime == nil {
 		return 0, ErrNotInitialized
 	}
@@ -46,7 +49,8 @@ func DispatchAutoRetryTasks(ctx context.Context, limit int) (int, error) {
 }
 
 func BatchEnqueue(ctx context.Context, tasks []Task, opts ...Option) ([]*TaskInfo, error) {
-	runtime := Runtime(ctx)
+	runtime, release := acquireRuntime(ctx)
+	defer release()
 	if runtime == nil {
 		return nil, ErrNotInitialized
 	}

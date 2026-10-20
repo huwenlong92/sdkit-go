@@ -41,15 +41,31 @@ func (a *App) Stop(ctx context.Context) error {
 	if runtimeCancel != nil {
 		runtimeCancel()
 	}
-	err = errors.Join(
-		a.stopProviders(ctx, providers, ""),
-		a.shutdownCapabilities(ctx, capabilities),
-	)
+	// Capabilities are no longer ready while defaults drain, including between
+	// Stop attempts after a deadline. Their resources remain owned until retry.
+	for _, capability := range capabilities {
+		setObjectStatus(capability, StatusStopping, nil)
+	}
+	providerErr := a.stopProviders(ctx, providers, "")
+	if defaultErr := a.releaseProcessDefaults(ctx); defaultErr != nil {
+		a.mu.Lock()
+		a.stopping = false
+		a.mu.Unlock()
+		return errors.Join(providerErr, defaultErr)
+	}
+	err = errors.Join(providerErr, a.shutdownCapabilities(ctx, capabilities))
+	a.Container().Clear()
+	// A timed-out shutdown may still be running. Keep its default reservations
+	// so a late callback cannot tear down a new App's process state.
+	if ctx.Err() == nil {
+		a.releaseDefaultReservations()
+	}
 
 	a.mu.Lock()
 	a.runningProviders = nil
 	a.registeredCapabilities = nil
 	a.stopped = true
+	a.stopPending = false
 	a.stopErr = err
 	a.stopping = false
 	a.mu.Unlock()
@@ -68,8 +84,10 @@ func (a *App) prepareRunContext(ctxs ...context.Context) context.Context {
 	a.ctx = ctx
 	a.cancel = cancel
 	a.registeredCapabilities = nil
+	a.defaultReleaseDone = nil
 	a.runningProviders = nil
 	a.stopping = false
+	a.stopPending = false
 	a.stopped = false
 	a.stopErr = nil
 	a.mu.Unlock()
@@ -98,6 +116,11 @@ func (a *App) clearRunningProviders() {
 
 func (a *App) cancelRuntimeContext() {
 	a.mu.Lock()
+	// Publish shutdown intent before cancellation wakes Run/RunProvider. A
+	// deadline while acquiring the gate or draining defaults still needs retry.
+	if !a.stopped {
+		a.stopPending = true
+	}
 	cancel := a.cancel
 	a.mu.Unlock()
 	if cancel != nil {
@@ -108,7 +131,7 @@ func (a *App) cancelRuntimeContext() {
 func (a *App) isStopping() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.stopping || a.stopped
+	return a.stopping || a.stopPending || a.stopped
 }
 
 type providerStartResult struct {

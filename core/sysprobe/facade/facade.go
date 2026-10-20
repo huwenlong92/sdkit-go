@@ -3,6 +3,7 @@ package facade
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -79,11 +80,18 @@ func Use(opts ...Option) runtime.Capability {
 			}
 			service = sysprobe.New(cfg)
 		}
-		if err := app.Container().Bind(runtime.Key(o.name), service); err != nil {
-			return err
-		}
 		if o.bindDefault {
-			defaultService.CompareAndSwap(nil, service)
+			if defaultService.Load() != service && !defaultService.CompareAndSwap(nil, service) {
+				err := errors.Join(runtime.ErrDefaultConflict, service.Close())
+				service = nil
+				return err
+			}
+		}
+		if err := app.Container().Bind(runtime.Key(o.name), service); err != nil {
+			defaultService.CompareAndSwap(service, nil)
+			closeErr := service.Close()
+			service = nil
+			return errors.Join(err, closeErr)
 		}
 		return nil
 	}, func(context.Context) error {

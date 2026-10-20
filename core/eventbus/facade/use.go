@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"errors"
 
 	coreeventbus "github.com/huwenlong92/sdkit-go/core/eventbus"
 	redisfacade "github.com/huwenlong92/sdkit-go/core/redis/facade"
@@ -13,6 +14,7 @@ import (
 type UseOption func(*useOptions)
 
 type useOptions struct {
+	explicitOnly bool
 	config       Config
 	configLoader ConfigLoader
 	service      Service
@@ -57,6 +59,8 @@ func WithInternal() UseOption {
 	}
 }
 
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.explicitOnly = !enabled } }
+
 func Use(opts ...UseOption) runtime.Capability {
 	o := useOptions{}
 	for _, opt := range opts {
@@ -97,13 +101,24 @@ func Use(opts ...UseOption) runtime.Capability {
 				}
 			}
 			var err error
-			service, err = New(config, WithRedisClient(redisClient))
+			service, err = New(config, WithRedisClient(redisClient), WithoutDefault())
 			if err != nil {
 				return err
 			}
 		}
-		runtimeService = service
-		return coreeventbus.BindWithDriver(app, service, service.Driver())
+		if o.service == nil {
+			runtimeService = service
+		}
+		bind := func() error {
+			if o.explicitOnly {
+				return app.Container().Bind(runtime.Key(Name), service)
+			}
+			return coreeventbus.BindWithDriver(app, service, service.Driver())
+		}
+		if err := bind(); err != nil {
+			return errors.Join(err, closeService(&runtimeService))
+		}
+		return nil
 	}, func(context.Context) error {
 		return closeService(&runtimeService)
 	})
@@ -119,6 +134,7 @@ func From(app *runtime.App) Service {
 				return attachDefaultService{bus: bus}
 			}
 		}
+		return nil
 	}
 	bus, _ := coreeventbus.DefaultWithDriver()
 	if bus == nil {

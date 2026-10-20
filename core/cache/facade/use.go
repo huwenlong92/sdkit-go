@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 
 	corecache "github.com/huwenlong92/sdkit-go/core/cache"
 	redisfacade "github.com/huwenlong92/sdkit-go/core/redis/facade"
@@ -13,6 +14,7 @@ import (
 type UseOption func(*useOptions)
 
 type useOptions struct {
+	explicitOnly bool
 	config       Config
 	configLoader ConfigLoader
 	cache        Cache
@@ -66,6 +68,9 @@ func WithExternal() UseOption {
 	}
 }
 
+// WithDefault controls publication of a process default. Disable it for isolated Apps.
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.explicitOnly = !enabled } }
+
 func Use(opts ...UseOption) runtime.Capability {
 	o := defaultUseOptions()
 	for _, opt := range opts {
@@ -74,6 +79,7 @@ func Use(opts ...UseOption) runtime.Capability {
 		}
 	}
 
+	var owned Cache
 	return runtime.NewCapabilityWithMetadataAndDependencies(runtime.CapabilityMetadata{
 		Name:        Name,
 		Description: "Cache store",
@@ -98,9 +104,29 @@ func Use(opts ...UseOption) runtime.Capability {
 			}
 			cache = corecache.NewFromConfig(&config, rdb)
 		}
-		return corecache.Bind(app, cache)
-	}, func(context.Context) error {
-		corecache.Close()
+		if o.cache == nil {
+			owned = cache
+		}
+		bind := func() error {
+			if o.explicitOnly {
+				return app.Container().Bind(runtime.Key(Name), cache)
+			}
+			return corecache.Bind(app, cache)
+		}
+		if err := bind(); err != nil {
+			if owned != nil {
+				err = errors.Join(err, owned.Close())
+				owned = nil
+			}
+			return err
+		}
 		return nil
+	}, func(context.Context) error {
+		if owned == nil {
+			return nil
+		}
+		current := owned
+		owned = nil
+		return current.Close()
 	})
 }

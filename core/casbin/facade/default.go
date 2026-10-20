@@ -6,7 +6,7 @@ import (
 )
 
 func Default() *Manager {
-	return corecasbin.Default
+	return corecasbin.From(nil)
 }
 
 func From(app *runtime.App) *Manager {

@@ -10,6 +10,7 @@ import (
 type UseOption func(*useOptions)
 
 type useOptions struct {
+	explicitOnly  bool
 	config        Config
 	hasConfig     bool
 	configLoader  ConfigLoader
@@ -101,6 +102,8 @@ func WithInternal() UseOption {
 	}
 }
 
+func WithDefault(enabled bool) UseOption { return func(o *useOptions) { o.explicitOnly = !enabled } }
+
 func Use(opts ...UseOption) runtime.Capability {
 	o := defaultUseOptions()
 	for _, opt := range opts {
@@ -164,9 +167,11 @@ func Use(opts ...UseOption) runtime.Capability {
 				return err
 			}
 		}
+		if o.explicitOnly {
+			return app.Container().Bind(runtime.Key(Name), service)
+		}
 		return corepayment.Bind(app, service)
 	}, func(context.Context) error {
-		corepayment.Close()
 		return nil
 	})
 }

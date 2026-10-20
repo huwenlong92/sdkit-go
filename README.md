@@ -116,6 +116,25 @@ Queue 可通过 `producer.Resolve(serviceContext)` 获取投递接口，通过 `
 
 Session 的 Set Hook 在凭据持久化前执行，失败清空会话并发送过期 Cookie；Hook 应使用传入 Session 的暂存值，不能依赖凭据已写入响应。多个 Session Hook 按顺序执行并在首个错误处停止；跨 Redis 与 Cookie 的副作用不具备分布式事务保证。Auth 的刷新失败会执行全部失败清理，保留原始错误和清理错误。
 
+### 工厂、默认实例和并发关闭
+
+`ServiceRunnerOptions.CapabilityFactories` 在统一装配入口登记 `map[string]runtime.CapabilityFactory`。Provider 的 `RequireCapabilities` 声明所需能力；Runner 按需展开必需依赖，每个 App 创建一次。工厂只构造契约，资源读取放入 `Register` 或配置/选项 loader。`App` 管理依赖排序、初始化、回滚与停止；Runner 负责服务选择和装配。Global 在 App 内共享，ServiceLocal 以服务实例名隔离。
+
+Runtime 状态属于 App，通过 `app.Capability(name).Status()` 或 `app.CapabilityStatus(name)` 查询，原始声明对象不作为 App 的状态存储。每个 App 必须使用新的 capability；复用同一 capability 到另一个运行中的 App 返回 `ErrCapabilityInUse`。支持默认实例的 Facade 可用 `WithDefault(false)` 仅绑定 App 容器，实现多 App 隔离；Logger 也支持独立的 `NewManaged` 构造和关闭函数。Tracing 使用进程级 OpenTelemetry 状态，第二个 App 明确冲突。
+
+进程默认实例冲突返回 `runtime.ErrDefaultConflict`，不会覆盖另一个 App。Stop 先停止服务，再解绑默认实例、逆序关闭自身创建的资源、清空容器，最后释放进程保留项。默认 API 调用尚未结束时，Stop 遵守期限返回，保留资源和默认实例占用，调用结束后可再次 Stop 完成清理。能力自身的 Shutdown 超时仍可能有合作回调未返回，因此保留进程占用，避免迟到的关闭影响新 App；需要调查超时回调或重启进程。
+
+Queue Operations 通过 `operations.Use(operations.WithConfig(cfg), operations.WithDefault(true))` 选择进程默认实例。业务直接调用：
+
+```go
+queues, err := queue.ListQueues(ctx)
+entries, err := crontab.ListEntries(ctx)
+```
+
+Crontab Provider 在管理实例构造成功后调用 `crontab.BindDefaultOperations(app, operations)`；该绑定借用实例，创建它的 capability 负责 Shutdown。未初始化分别返回 `queue.ErrNotInitialized`、`crontab.ErrNotInitialized`。Queue 原有 Context 实例优先，投递和运维方法都保留显式实例 API。包级运维调用与解绑协调，关闭前等待正在执行的方法退出；调用方应给 Context 设置合理期限。
+
+旧 `Use`、`From`、Facade、构造和显式实例 API 保留。资源注入均为借用，替换默认值不再隐式关闭被替换的资源；旧手动 `SetDefault`/`Bind(nil, ...)` 路径由调用者管理旧实例关闭，不可与 Runtime 默认实例混用。导出的兼容变量（如 `database.DB`、`logger.L`、`redis.RDB`）保留，但直接读写变量不提供并发保证；新代码使用同步 getter。多个独立 App 选择显式实例，避免进程级 API。
+
 ## 目录结构
 
 ```text

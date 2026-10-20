@@ -27,6 +27,7 @@ func TestUseWithoutRedisBindsMemoryStore(t *testing.T) {
 	})
 
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(ratelimit.Use()); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}
@@ -51,6 +52,7 @@ func TestUseWithStoreBindsInjectedStore(t *testing.T) {
 		_ = store.Close()
 	})
 	app := runtime.New()
+	t.Cleanup(func() { _ = app.Stop(context.Background()) })
 	if err := app.Use(ratelimit.Use(ratelimit.WithStore(store))); err != nil {
 		t.Fatalf("Use() error = %v", err)
 	}

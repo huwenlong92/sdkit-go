@@ -3,9 +3,11 @@ package runtime
 import (
 	"context"
 	"errors"
+	"sync"
 )
 
 var (
+	ErrCapabilityInUse         = errors.New("runtime: capability already owned by another app")
 	ErrCapabilityNil           = errors.New("runtime: capability is nil")
 	ErrCapabilityNameRequired  = errors.New("runtime: capability name is required")
 	ErrCapabilityNameReserved  = errors.New("runtime: capability name is reserved")
@@ -79,10 +81,18 @@ func NewCapabilityWithMetadataAndDependencies(metadata CapabilityMetadata, depen
 		register:     register,
 		shutdown:     shutdown,
 		state:        newRuntimeStatus(),
+		lifecycle:    &capabilityOwnership{},
 	}
 }
 
+type capabilityOwnership struct {
+	sync.Mutex
+	app    *App
+	active bool
+}
+
 type namedCapabilityFunc struct {
+	lifecycle    *capabilityOwnership
 	metadata     CapabilityMetadata
 	dependencies []Dependency
 	register     func(app *App) error
@@ -106,10 +116,29 @@ func (f namedCapabilityFunc) Register(app *App) error {
 	if f.register == nil {
 		return ErrCapabilityNil
 	}
-	return f.register(app)
+	f.lifecycle.Lock()
+	defer f.lifecycle.Unlock()
+	if f.lifecycle.active {
+		if f.lifecycle.app == app {
+			return nil
+		}
+		return ErrCapabilityInUse
+	}
+	if err := f.register(app); err != nil {
+		return err
+	}
+	f.lifecycle.app = app
+	f.lifecycle.active = true
+	return nil
 }
 
 func (f namedCapabilityFunc) Shutdown(ctx context.Context) error {
+	f.lifecycle.Lock()
+	defer f.lifecycle.Unlock()
+	if !f.lifecycle.active {
+		return nil
+	}
+	defer func() { f.lifecycle.active = false; f.lifecycle.app = nil }()
 	if f.shutdown == nil {
 		return nil
 	}

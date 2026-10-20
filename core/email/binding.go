@@ -11,22 +11,19 @@ func From(app *runtime.App) *Manager {
 				return manager
 			}
 		}
+		return nil
 	}
 	manager, _ := ManagerDefault()
 	return manager
 }
 
 func Bind(app *runtime.App, manager *Manager) error {
-	if manager == nil {
-		SetDefault(nil)
-		if app == nil {
-			return nil
-		}
-		return runtime.ErrContainerValueNil
-	}
-	SetDefault(manager)
 	if app == nil {
+		SetDefault(manager)
 		return nil
 	}
-	return app.Container().Bind(KeyEmail, manager)
+	if manager == nil {
+		return runtime.ErrContainerValueNil
+	}
+	return runtime.BindProcessDefault(app, KeyEmail, manager, func() { SetDefault(manager) }, func() { SetDefault(nil) })
 }
