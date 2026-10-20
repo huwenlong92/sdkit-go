@@ -46,7 +46,7 @@ func Middleware(opts ...MiddlewareOption) gin.HandlerFunc {
 					return
 				}
 
-				logger.L.Error("panic recovered",
+				logger.Default().Error("panic recovered",
 					zap.Any("error", err),
 					zap.String("request", c.Request.Method+" "+c.Request.URL.String()),
 					zap.String("stack", string(debug.Stack())),

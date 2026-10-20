@@ -39,7 +39,7 @@ func (p *OutboxPoller) Run(ctx context.Context) error {
 		return ErrNotInitialized
 	}
 	if err := p.flush(ctx); err != nil {
-		logger.WithContext(ctx, logger.L).Warn("Queue Outbox刷新失败", zap.Error(err))
+		logger.WithContext(ctx, logger.Default()).Warn("Queue Outbox刷新失败", zap.Error(err))
 	}
 	ticker := time.NewTicker(p.cfg.FlushInterval)
 	defer ticker.Stop()
@@ -49,7 +49,7 @@ func (p *OutboxPoller) Run(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := p.flush(ctx); err != nil {
-				logger.WithContext(ctx, logger.L).Warn("Queue Outbox刷新失败", zap.Error(err))
+				logger.WithContext(ctx, logger.Default()).Warn("Queue Outbox刷新失败", zap.Error(err))
 			}
 		}
 	}
@@ -59,7 +59,7 @@ func (p *OutboxPoller) Start(ctx context.Context) context.CancelFunc {
 	runCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		if err := p.Run(runCtx); err != nil && runCtx.Err() == nil {
-			logger.WithContext(runCtx, logger.L).Warn("Queue Outbox Poller退出", zap.Error(err))
+			logger.WithContext(runCtx, logger.Default()).Warn("Queue Outbox Poller退出", zap.Error(err))
 		}
 	}()
 	return cancel

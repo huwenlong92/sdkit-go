@@ -68,6 +68,9 @@ func ClientFrom(app *runtime.App) *goredis.Client {
 	if client := From(app); client != nil {
 		return client.Rdb
 	}
+	if app != nil {
+		return nil
+	}
 	return Raw()
 }
 

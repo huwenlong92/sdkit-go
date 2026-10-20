@@ -56,15 +56,15 @@ func Default() Cache {
 
 // Init 初始化全局缓存：有 Redis 用 Redis，否则内存
 func Init(cacheCfg *Config) error {
-	log := logger.L
+	log := logger.Default()
 	if log == nil {
 		log = zap.NewNop()
 	}
 
-	if coreredis.RDB == nil {
+	if coreredis.Client() == nil {
 		log.Debug("Redis未初始化，使用内存缓存")
 	}
-	replaceDefault(NewFromConfig(cacheCfg, coreredis.RDB))
+	replaceDefault(NewFromConfig(cacheCfg, coreredis.Client()))
 	return nil
 }
 

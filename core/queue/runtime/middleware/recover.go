@@ -12,7 +12,7 @@ import (
 )
 
 func Recover(loggers ...*zap.Logger) queue.Middleware {
-	log := logger.L
+	log := logger.Default()
 	if len(loggers) > 0 && loggers[0] != nil {
 		log = loggers[0]
 	}
